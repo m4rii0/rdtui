@@ -11,11 +11,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mario/real-debrid/internal/app"
-	"github.com/mario/real-debrid/internal/auth"
-	"github.com/mario/real-debrid/internal/download"
-	"github.com/mario/real-debrid/internal/realdebrid"
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/auth"
+	"github.com/m4rii0/rdtui/internal/download"
+	"github.com/m4rii0/rdtui/internal/realdebrid"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 const refreshInterval = 5 * time.Second

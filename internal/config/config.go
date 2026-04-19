@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 const appName = "rdtui"

@@ -1,4 +1,4 @@
-module github.com/mario/real-debrid
+module github.com/m4rii0/rdtui
 
 go 1.26.2
 

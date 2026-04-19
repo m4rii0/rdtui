@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func TestTorrentListWindowKeepsSelectionVisible(t *testing.T) {

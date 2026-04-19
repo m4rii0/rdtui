@@ -5,8 +5,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mario/real-debrid/internal/app"
-	"github.com/mario/real-debrid/internal/tui"
+	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/tui"
 )
 
 func main() {

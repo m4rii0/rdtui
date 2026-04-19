@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mario/real-debrid/internal/config"
-	"github.com/mario/real-debrid/internal/realdebrid"
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/realdebrid"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 var ErrNoValidCredentials = errors.New("no valid credentials")

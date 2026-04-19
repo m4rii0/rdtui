@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func TestSortTorrentsAddedNewestFirst(t *testing.T) {
@@ -173,11 +173,11 @@ func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
 
 func TestStatusRankOrdering(t *testing.T) {
 	ranks := map[string]int{
-		"downloading":            0,
-		"queued":                 1,
-		"downloaded":             3,
-		"error":                  5,
-		"unknown_status":         4,
+		"downloading":             0,
+		"queued":                  1,
+		"downloaded":              3,
+		"error":                   5,
+		"unknown_status":          4,
 		"waiting_files_selection": 2,
 	}
 	for status, want := range ranks {

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func TestDefaultFileSelectionChoosesLargestFile(t *testing.T) {

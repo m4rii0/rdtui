@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 var ErrNoCommandConfigured = errors.New("no external downloader configured")

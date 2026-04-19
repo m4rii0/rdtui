@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mario/real-debrid/internal/config"
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func TestBootstrapPrefersConfiguredPrivateToken(t *testing.T) {

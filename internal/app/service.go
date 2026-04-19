@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mario/real-debrid/internal/auth"
-	"github.com/mario/real-debrid/internal/config"
-	"github.com/mario/real-debrid/internal/download"
-	"github.com/mario/real-debrid/internal/realdebrid"
-	"github.com/mario/real-debrid/pkg/models"
+	"github.com/m4rii0/rdtui/internal/auth"
+	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/download"
+	"github.com/m4rii0/rdtui/internal/realdebrid"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 type Service struct {
