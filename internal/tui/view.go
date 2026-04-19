@@ -18,6 +18,8 @@ var (
 	okStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	boxStyle              = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 	selectedStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
+	headerRowStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
+	headerSelColStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
 	statusDownloadedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusWaitingStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	statusErrorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
@@ -109,7 +111,7 @@ func renderMain(m Model) string {
 	if width <= 0 {
 		width = 120
 	}
-	leftWidth := max(34, width/3)
+	leftWidth := torrentListPaneWidth(width)
 	rightWidth := max(40, width-leftWidth-6)
 	leftInnerWidth := max(10, leftWidth-boxStyle.GetHorizontalFrameSize())
 	rightInnerWidth := max(10, rightWidth-boxStyle.GetHorizontalFrameSize())
@@ -133,7 +135,7 @@ func renderMain(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, "", mutedStyle.Render("j/k move  r refresh  m magnet  u url  i import  s select  y copy url  x launch  d delete  q quit"))
+	lines = append(lines, "", mutedStyle.Render("j/k rows  h/l cols  enter sort  r refresh  m magnet  u url  i import  s select  y copy  x launch  d delete  q quit"))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -147,43 +149,32 @@ func renderTorrentList(m Model, width, height int) string {
 	if width <= 0 {
 		width = 20
 	}
-	lines := []string{"Torrents"}
 	if len(m.torrents) == 0 {
-		lines = append(lines, "", truncateLine(mutatedOrPlain("No torrents loaded", mutedStyle), width))
-		return strings.Join(fitLines(lines, height), "\n")
+		return strings.Join(fitLines([]string{"Torrents", "", mutedStyle.Render("No torrents loaded")}, height), "\n")
 	}
-	footerLines := 0
-	visibleRows := max(1, height-2)
-	if len(m.torrents) > visibleRows {
-		footerLines = 1
-		visibleRows = max(1, height-3)
-	}
-	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, visibleRows)
-	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), visibleRows, start)
+	bodyHeight := max(1, height-2)
+	showScrollbar := len(m.torrents) > bodyHeight
+	columns := tableColumns(width, showScrollbar)
+	header := renderTableHeader(columns, m.selectedColumn, m.sortColumn, m.sortAscending, width)
+	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, bodyHeight)
+	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), bodyHeight, start)
 
-	lines = append(lines, "")
+	var bodyLines []string
 	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
-		torrent := m.torrents[idx]
-		line := fmt.Sprintf("%s  %6s%%  %s", statusGlyph(torrent.Status), formatProgress(torrent.Progress), torrent.Filename)
-		if len(m.torrents) > visibleRows {
-			line = lipgloss.JoinHorizontal(lipgloss.Top,
-				truncateLine(line, max(1, width-2)),
-				" ",
-				mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize)),
-			)
-		} else {
-			line = truncateLine(line, width)
+		rowStr := renderTableRow(m.torrents[idx], columns)
+		if showScrollbar {
+			rowStr = truncateLine(rowStr, max(1, width-2)) + " " + mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize))
 		}
 		if idx == m.selectedIdx {
-			line = selectedStyle.Render(line)
+			rowStr = selectedStyle.Width(width).Render(truncateLine(rowStr, width))
+		} else {
+			rowStr = truncateLine(rowStr, width)
 		}
-		lines = append(lines, line)
+		bodyLines = append(bodyLines, rowStr)
 	}
 
-	if footerLines > 0 {
-		lines = append(lines, "", truncateLine(mutatedOrPlain(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.torrents)), mutedStyle), width))
-	}
-
+	lines := []string{"Torrents", header}
+	lines = append(lines, bodyLines...)
 	return strings.Join(fitLines(lines, height), "\n")
 }
 
@@ -320,6 +311,13 @@ func humanBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %s", value, units[unit])
 }
 
+func formatAddedTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.Local().Format("2006-01-02")
+}
+
 func formatProgress(progress float64) string {
 	if progress == math.Trunc(progress) {
 		return fmt.Sprintf("%.0f", progress)
@@ -427,8 +425,27 @@ func truncateLine(line string, width int) string {
 	return ansi.Truncate(line, width, "…")
 }
 
-func mutatedOrPlain(value string, style lipgloss.Style) string {
-	return style.Render(value)
+func torrentListPaneWidth(totalWidth int) int {
+	leftWidth := max(52, (totalWidth*3)/5)
+	maxLeft := totalWidth - 46
+	if maxLeft < 34 {
+		return max(34, totalWidth/2)
+	}
+	if leftWidth > maxLeft {
+		leftWidth = maxLeft
+	}
+	return leftWidth
+}
+
+func compactTorrentStatus(status string) string {
+	switch status {
+	case "waiting_files_selection":
+		return "waiting"
+	case "magnet_error":
+		return "magneterr"
+	default:
+		return status
+	}
 }
 
 func max64(values ...int64) int64 {

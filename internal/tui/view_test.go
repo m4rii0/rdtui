@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,12 +46,15 @@ func TestScrollbarThumbFitsVisibleTrack(t *testing.T) {
 
 func TestRenderViewHeightWithManyTorrents(t *testing.T) {
 	m := Model{
-		mode:        modeMain,
-		width:       120,
-		height:      24,
-		selectedIdx: 35,
-		session:     &models.AuthSession{User: models.User{Username: "debug"}},
-		detail:      &models.TorrentInfo{Torrent: models.Torrent{Filename: "selected torrent", Status: "downloading", Progress: 99.67}, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
+		mode:           modeMain,
+		width:          120,
+		height:         24,
+		selectedIdx:    35,
+		selectedColumn: colAdded,
+		sortColumn:     colAdded,
+		sortAscending:  false,
+		session:        &models.AuthSession{User: models.User{Username: "debug"}},
+		detail:         &models.TorrentInfo{Torrent: models.Torrent{Filename: "selected torrent", Status: "downloading", Progress: 99.67}, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
 	}
 	for i := 0; i < 80; i++ {
 		m.torrents = append(m.torrents, models.Torrent{
@@ -67,5 +71,96 @@ func TestRenderViewHeightWithManyTorrents(t *testing.T) {
 	t.Logf("rendered height=%d", height)
 	if height > m.height {
 		t.Fatalf("rendered height = %d, want <= %d\n%s", height, m.height, view)
+	}
+}
+
+func TestLongNamesDoNotWrap(t *testing.T) {
+	torrent := models.Torrent{
+		ID:       "1",
+		Filename: strings.Repeat("A", 200),
+		Status:   "downloaded",
+		Progress: 100,
+		Added:    time.Now(),
+		Bytes:    1024,
+	}
+	m := Model{
+		mode:           modeMain,
+		width:          120,
+		height:         24,
+		selectedIdx:    0,
+		selectedColumn: colAdded,
+		sortColumn:     colAdded,
+		sortAscending:  false,
+		session:        &models.AuthSession{User: models.User{Username: "test"}},
+		torrents:       []models.Torrent{torrent},
+		detail:         &models.TorrentInfo{Torrent: torrent, OriginalBytes: 1024},
+	}
+
+	view := renderView(m)
+	padW := appStyle.GetHorizontalFrameSize()
+	for _, line := range strings.Split(view, "\n") {
+		w := lipgloss.Width(line)
+		if w > m.width+padW {
+			t.Fatalf("line width %d exceeds terminal width %d (incl padding): %q", w, m.width+padW, line)
+		}
+	}
+}
+
+func TestTableColumnsWidthsSumValid(t *testing.T) {
+	for _, totalWidth := range []int{40, 60, 80, 100, 120} {
+		for _, scrollbar := range []bool{true, false} {
+			cols := tableColumns(totalWidth, scrollbar)
+			sum := 0
+			for _, c := range cols {
+				sum += c.Width
+			}
+			gaps := len(cols) - 1
+			if scrollbar {
+				gaps += 2
+			}
+			totalUsed := sum + gaps
+			if totalUsed > totalWidth {
+				t.Errorf("totalWidth=%d scrollbar=%v: used %d (cols sum=%d gaps=%d)", totalWidth, scrollbar, totalUsed, sum, gaps)
+			}
+		}
+	}
+}
+
+func TestRenderTableHeaderShowsSortArrow(t *testing.T) {
+	cols := tableColumns(80, false)
+
+	h := renderTableHeader(cols, colAdded, colAdded, false, 80)
+	if !strings.Contains(h, "↓") {
+		t.Fatal("descending sort should show ↓")
+	}
+
+	h = renderTableHeader(cols, colAdded, colAdded, true, 80)
+	if !strings.Contains(h, "↑") {
+		t.Fatal("ascending sort should show ↑")
+	}
+
+	h = renderTableHeader(cols, colAdded, colSize, false, 80)
+	if strings.Contains(h, "↓") {
+		glyphs := strings.Count(h, "↓") + strings.Count(h, "↑")
+		if glyphs > 1 {
+			t.Fatal("only the sorted column should have an arrow")
+		}
+	}
+}
+
+func TestPadVisual(t *testing.T) {
+	got := padVisual("hi", 6, false)
+	if got != "hi    " {
+		t.Fatalf("left-aligned: %q", got)
+	}
+
+	got = padVisual("hi", 6, true)
+	if got != "    hi" {
+		t.Fatalf("right-aligned: %q", got)
+	}
+
+	got = padVisual("toolong", 4, false)
+	if lipgloss.Width(got) != 4 {
+		t.Fatalf("truncated width = %d, want 4: %q", lipgloss.Width(got), got)
 	}
 }

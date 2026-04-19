@@ -75,9 +75,12 @@ type Model struct {
 	errText string
 	session *models.AuthSession
 
-	torrents    []models.Torrent
-	selectedIdx int
-	detail      *models.TorrentInfo
+	torrents       []models.Torrent
+	selectedIdx    int
+	detail         *models.TorrentInfo
+	selectedColumn int
+	sortColumn     int
+	sortAscending  bool
 
 	input       textinput.Model
 	inputPrompt string
@@ -154,9 +157,12 @@ func NewModel(service *app.Service) Model {
 	ti.Prompt = "> "
 	ti.Width = 64
 	return Model{
-		service: service,
-		mode:    modeStarting,
-		input:   ti,
+		service:        service,
+		mode:           modeStarting,
+		input:          ti,
+		sortColumn:     colAdded,
+		selectedColumn: colAdded,
+		sortAscending:  false,
 	}
 }
 
@@ -259,7 +265,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		selectedID := m.selectedTorrentID()
-		m.torrents = msg.torrents
+		m.torrents = append([]models.Torrent(nil), msg.torrents...)
+		sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
 		m.selectedIdx = selectedIndexForID(m.torrents, selectedID)
 		m.errText = ""
 		if len(m.torrents) == 0 {
@@ -434,6 +441,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			return m, tea.Quit
+		case "left", "h":
+			m.moveColumnSelection(-1)
+			return m, nil
+		case "right", "l":
+			m.moveColumnSelection(1)
+			return m, nil
+		case "enter":
+			m.sortSelectedColumn()
+			return m, nil
 		case "up", "k":
 			if m.selectedIdx > 0 {
 				m.selectedIdx--
@@ -624,6 +640,34 @@ func (m Model) selectedTorrentID() string {
 		return ""
 	}
 	return m.torrents[m.selectedIdx].ID
+}
+
+func (m *Model) sortSelectedColumn() {
+	selectedID := m.selectedTorrentID()
+	if m.sortColumn == m.selectedColumn {
+		m.sortAscending = !m.sortAscending
+	} else {
+		m.sortColumn = m.selectedColumn
+		m.sortAscending = false
+	}
+	sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
+	m.selectedIdx = selectedIndexForID(m.torrents, selectedID)
+	dir := "↓"
+	if m.sortAscending {
+		dir = "↑"
+	}
+	m.status = "Sorted by " + columnLabel(m.sortColumn) + " " + dir
+	m.errText = ""
+}
+
+func (m *Model) moveColumnSelection(delta int) {
+	m.selectedColumn += delta
+	if m.selectedColumn < 0 {
+		m.selectedColumn = columnCount - 1
+	}
+	if m.selectedColumn >= columnCount {
+		m.selectedColumn = 0
+	}
 }
 
 func (m Model) needsTextInputUpdate() bool {
