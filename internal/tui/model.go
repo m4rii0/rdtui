@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/auth"
+	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/internal/version"
@@ -179,6 +180,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		debug.Log("Update: WindowSize %dx%d", msg.Width, msg.Height)
 		return m, nil
 
 	case bootstrapMsg:
@@ -379,6 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	debug.Log("handleKey: key=%q mode=%s", msg.String(), m.mode)
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -500,10 +503,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errText = ""
 			return m, m.input.Focus()
 		case "i":
-			startDir := userHomeDir()
-			m.browser = newFileBrowser(startDir)
+			m.browser = newFileBrowser(".")
 			m.mode = modeFileBrowser
 			m.errText = ""
+			debug.Log("handler: entering file browser, dir=%s entries=%d", m.browser.CurrentDir, len(m.browser.Entries))
 			return m, nil
 		case "s":
 			if m.detail == nil || m.detail.Status != "waiting_files_selection" {
@@ -558,7 +561,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case modeFileBrowser:
-		switch msg.String() {
+		m.errText = ""
+		key := msg.String()
+		debug.Log("handler: fileBrowser key=%q cursor=%d entries=%d selected=%d visual=%v",
+			key, m.browser.Cursor, len(m.browser.Entries), len(m.browser.Selected), m.browser.VisualMode)
+		switch key {
 		case "esc":
 			m.mode = modeMain
 			return m, nil
@@ -570,8 +577,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.browser.openCurrent()
 		case " ":
 			m.browser.toggleCurrent()
+		case "V":
+			m.browser.toggleVisual()
+		case "ctrl+a":
+			m.browser.toggleAll()
+		case "ctrl+d":
+			m.browser.clearSelection()
+		case "H":
+			m.browser.ShowHidden = !m.browser.ShowHidden
+			m.browser.reload()
 		case "backspace", "left", "h":
 			m.browser.CurrentDir = filepathDir(m.browser.CurrentDir)
+			m.browser.VisualMode = false
 			m.browser.reload()
 		case "ctrl+s":
 			selected := m.browser.selectedPaths()

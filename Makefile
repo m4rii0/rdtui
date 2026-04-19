@@ -6,7 +6,7 @@ BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
-.PHONY: help build run test test-race lint vet fmt tidy clean install check build-all
+.PHONY: help build run run-debug test test-race lint vet fmt tidy clean install check build-all
 
 help:
 	@printf '%s\n' \
@@ -14,6 +14,7 @@ help:
 	  '  make build      Build the binary into bin/' \
 	  '  make build-all  Build binaries for darwin/linux/windows (amd64+arm64)' \
 	  '  make run        Run the TUI directly with go run' \
+	  '  make run-debug  Run the TUI with debug logging (RDTUI_DEBUG=1)' \
 	  '  make test       Run the Go test suite' \
 	  '  make test-race  Run tests with the race detector' \
 	  '  make lint       Run go vet and golangci-lint if available' \
@@ -41,6 +42,9 @@ build-all:
 
 run:
 	$(GO) run $(LDFLAGS) $(CMD_DIR)
+
+run-debug:
+	RDTUI_DEBUG=1 $(GO) run $(LDFLAGS) $(CMD_DIR)
 
 test:
 	$(GO) test ./...

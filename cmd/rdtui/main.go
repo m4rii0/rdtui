@@ -6,11 +6,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/internal/tui"
 	"github.com/m4rii0/rdtui/internal/version"
 )
 
 func main() {
+	debug.Init()
+
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Printf("rdtui %s\n", version.Version)
 		return

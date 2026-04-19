@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/m4rii0/rdtui/internal/debug"
 )
 
 var (
@@ -26,6 +27,10 @@ var (
 )
 
 func renderView(m Model) string {
+	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
+	if m.mode == modeFileBrowser {
+		return renderFileBrowserPopup(m)
+	}
 	var body string
 	switch m.mode {
 	case modeStarting:
@@ -282,9 +287,6 @@ func renderTorrentList(m Model, width, height int) string {
 
 func renderModal(m Model) string {
 	switch m.mode {
-	case modeFileBrowser:
-		height := max(12, m.height/2)
-		return m.browser.view(height)
 	case modeSelectFiles:
 		var lines []string
 		lines = append(lines, "Select files for torrent", "", "Space=toggle  Enter=confirm  Esc=cancel", "")
@@ -499,4 +501,41 @@ func max64(values ...int64) int64 {
 		}
 	}
 	return out
+}
+
+func renderFileBrowserPopup(m Model) string {
+	width := m.width
+	height := m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+
+	debug.Log("renderFileBrowserPopup: term=%dx%d mode=%s returnMode=%s", width, height, m.mode, m.returnMode)
+	debug.Log("renderFileBrowserPopup: browser.CurrentDir=%s entries=%d cursor=%d selected=%d visual=%v",
+		m.browser.CurrentDir, len(m.browser.Entries), m.browser.Cursor, len(m.browser.Selected), m.browser.VisualMode)
+
+	popupW := max(40, width*7/10)
+	popupH := max(10, height/2)
+	innerW := popupW - 4
+	innerH := popupH - 2
+
+	debug.Log("renderFileBrowserPopup: popup=%dx%d inner=%dx%d", popupW, popupH, innerW, innerH)
+
+	title := headStyle.Render(" Import: " + m.browser.CurrentDir + " ")
+	content := m.browser.view(innerW, innerH)
+	if m.errText != "" {
+		content += "\n" + errorStyle.Render(m.errText)
+	}
+	popupBox := boxStyle.Width(innerW).Render(title + "\n" + content)
+
+	debug.Log("renderFileBrowserPopup: popupBox lines=%d", len(strings.Split(popupBox, "\n")))
+
+	result := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, popupBox)
+
+	debug.Log("renderFileBrowserPopup: result len=%d", len(result))
+
+	return result
 }
