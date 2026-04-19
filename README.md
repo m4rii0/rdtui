@@ -140,9 +140,17 @@ Batch imports preserve partial success: if some uploads fail, the successful tor
 go test ./...
 ```
 
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
+
 ## Disclaimer
 
 This project does not contain any copyrighted material. It is a client application that solely makes API calls to the [Real-Debrid](https://real-debrid.com) service. All content accessed through this tool is hosted and served by Real-Debrid; this repository contains no media files, torrents, or pirated content of any kind.
+
+This project is not affiliated with, endorsed by, or connected to Real-Debrid in any way.
+
+This software is provided "as is", without warranty of any kind, express or implied. Use it at your own risk.
 
 ## Notes
 
