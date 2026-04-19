@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -103,14 +104,17 @@ func renderDeviceAuth(m Model) string {
 }
 
 func renderMain(m Model) string {
-	left := renderTorrentList(m)
-	right := renderTorrentDetail(m)
+	paneHeight := mainPaneHeight(m)
 	width := m.width
 	if width <= 0 {
 		width = 120
 	}
 	leftWidth := max(34, width/3)
 	rightWidth := max(40, width-leftWidth-6)
+	leftInnerWidth := max(10, leftWidth-boxStyle.GetHorizontalFrameSize())
+	rightInnerWidth := max(10, rightWidth-boxStyle.GetHorizontalFrameSize())
+	left := renderTorrentList(m, leftInnerWidth, paneHeight)
+	right := renderTorrentDetail(m, rightInnerWidth, paneHeight)
 	leftBox := boxStyle.Width(leftWidth).Render(left)
 	rightBox := boxStyle.Width(rightWidth).Render(right)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "  ", rightBox)
@@ -136,25 +140,62 @@ func renderMain(m Model) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderTorrentList(m Model) string {
+func renderTorrentList(m Model, width, height int) string {
+	if height <= 0 {
+		height = 20
+	}
+	if width <= 0 {
+		width = 20
+	}
 	lines := []string{"Torrents"}
 	if len(m.torrents) == 0 {
-		lines = append(lines, "", mutedStyle.Render("No torrents loaded"))
-		return strings.Join(lines, "\n")
+		lines = append(lines, "", truncateLine(mutatedOrPlain("No torrents loaded", mutedStyle), width))
+		return strings.Join(fitLines(lines, height), "\n")
 	}
-	for idx, torrent := range m.torrents {
+	footerLines := 0
+	visibleRows := max(1, height-2)
+	if len(m.torrents) > visibleRows {
+		footerLines = 1
+		visibleRows = max(1, height-3)
+	}
+	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, visibleRows)
+	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), visibleRows, start)
+
+	lines = append(lines, "")
+	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
+		torrent := m.torrents[idx]
 		line := fmt.Sprintf("%s  %6s%%  %s", statusGlyph(torrent.Status), formatProgress(torrent.Progress), torrent.Filename)
+		if len(m.torrents) > visibleRows {
+			line = lipgloss.JoinHorizontal(lipgloss.Top,
+				truncateLine(line, max(1, width-2)),
+				" ",
+				mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize)),
+			)
+		} else {
+			line = truncateLine(line, width)
+		}
 		if idx == m.selectedIdx {
 			line = selectedStyle.Render(line)
 		}
 		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n")
+
+	if footerLines > 0 {
+		lines = append(lines, "", truncateLine(mutatedOrPlain(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.torrents)), mutedStyle), width))
+	}
+
+	return strings.Join(fitLines(lines, height), "\n")
 }
 
-func renderTorrentDetail(m Model) string {
+func renderTorrentDetail(m Model, width, height int) string {
+	if height <= 0 {
+		height = 20
+	}
+	if width <= 0 {
+		width = 20
+	}
 	if m.detail == nil {
-		return "Torrent Details\n\nSelect a torrent to view details."
+		return strings.Join(fitLines(truncateLines([]string{"Torrent Details", "", "Select a torrent to view details."}, width), height), "\n")
 	}
 	info := m.detail
 	lines := []string{
@@ -181,7 +222,7 @@ func renderTorrentDetail(m Model) string {
 	if len(info.Links) > 0 {
 		lines = append(lines, "", fmt.Sprintf("Generated links: %d", len(info.Links)))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(fitLines(truncateLines(lines, width), height), "\n")
 }
 
 func renderModal(m Model) string {
@@ -284,6 +325,110 @@ func formatProgress(progress float64) string {
 		return fmt.Sprintf("%.0f", progress)
 	}
 	return fmt.Sprintf("%.2f", progress)
+}
+
+func mainPaneHeight(m Model) int {
+	if m.height <= 0 {
+		return 20
+	}
+	reserved := 8
+	if m.status != "" {
+		reserved++
+	}
+	if m.errText != "" {
+		reserved++
+	}
+	if m.loading {
+		reserved++
+	}
+	return max(8, m.height-reserved)
+}
+
+func torrentListWindow(total, selected, visible int) (int, int) {
+	if visible <= 0 || total <= visible {
+		return 0, total
+	}
+	start := selected - visible/2
+	if start < 0 {
+		start = 0
+	}
+	maxStart := total - visible
+	if start > maxStart {
+		start = maxStart
+	}
+	return start, start + visible
+}
+
+func scrollbarThumb(total, visible, start int) (int, int) {
+	if total <= visible || visible <= 0 {
+		return 0, visible
+	}
+	thumbSize := int(math.Round(float64(visible*visible) / float64(total)))
+	if thumbSize < 1 {
+		thumbSize = 1
+	}
+	if thumbSize > visible {
+		thumbSize = visible
+	}
+	track := visible - thumbSize
+	if track <= 0 {
+		return 0, thumbSize
+	}
+	maxStart := total - visible
+	thumbTop := int(math.Round(float64(start) * float64(track) / float64(maxStart)))
+	if thumbTop < 0 {
+		thumbTop = 0
+	}
+	if thumbTop > track {
+		thumbTop = track
+	}
+	return thumbTop, thumbSize
+}
+
+func scrollbarGlyph(row, thumbTop, thumbSize int) string {
+	if row >= thumbTop && row < thumbTop+thumbSize {
+		return "█"
+	}
+	return "│"
+}
+
+func fitLines(lines []string, height int) []string {
+	if height <= 0 {
+		return lines
+	}
+	if len(lines) > height {
+		trimmed := append([]string(nil), lines[:height]...)
+		if height > 0 {
+			trimmed[height-1] = mutedStyle.Render("...")
+		}
+		return trimmed
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return lines
+}
+
+func truncateLines(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, truncateLine(line, width))
+	}
+	return out
+}
+
+func truncateLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return ansi.Truncate(line, width, "…")
+}
+
+func mutatedOrPlain(value string, style lipgloss.Style) string {
+	return style.Render(value)
 }
 
 func max64(values ...int64) int64 {
