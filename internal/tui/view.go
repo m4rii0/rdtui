@@ -27,6 +27,7 @@ var (
 	statusErrorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	batchMarkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("237"))
 	searchStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
+	matchHighlightStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("226"))
 )
 
 func renderView(m Model) string {
@@ -298,7 +299,7 @@ func renderTorrentList(m Model, width, height int) string {
 				mark = "  "
 			}
 		}
-		rowStr := mark + renderTableRow(t, columns)
+		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID])
 		if showScrollbar {
 			rowStr = truncateLine(rowStr, max(1, width-2)) + " " + mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize))
 		}
@@ -400,29 +401,33 @@ func detailFooter() string {
 }
 
 func statusLabel(status string) string {
+	return styledStatusLabel(status, statusLabelPlain(status))
+}
+
+func styledStatusLabel(status, text string) string {
 	switch status {
 	case "downloaded":
-		return statusDownloadedStyle.Render("DONE")
+		return statusDownloadedStyle.Render(text)
 	case "downloading":
-		return statusDownloadingStyle.Render("DL")
+		return statusDownloadingStyle.Render(text)
 	case "queued":
-		return statusWaitingStyle.Render("QD")
+		return statusWaitingStyle.Render(text)
 	case "compressing":
-		return statusWaitingStyle.Render("CMP")
+		return statusWaitingStyle.Render(text)
 	case "uploading":
-		return statusWaitingStyle.Render("UL")
+		return statusWaitingStyle.Render(text)
 	case "waiting_files_selection":
-		return statusWaitingStyle.Render("WAIT")
+		return statusWaitingStyle.Render(text)
 	case "error":
-		return statusErrorStyle.Render("ERR")
+		return statusErrorStyle.Render(text)
 	case "dead":
-		return statusErrorStyle.Render("DEAD")
+		return statusErrorStyle.Render(text)
 	case "virus":
-		return statusErrorStyle.Render("VIRUS")
+		return statusErrorStyle.Render(text)
 	case "magnet_error":
-		return statusErrorStyle.Render("MAGERR")
+		return statusErrorStyle.Render(text)
 	default:
-		return mutedStyle.Render(status)
+		return mutedStyle.Render(text)
 	}
 }
 

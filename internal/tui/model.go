@@ -105,6 +105,7 @@ type Model struct {
 	sortColumn      int
 	sortAscending   bool
 	filterApplied   bool
+	filterMatches   map[string][]int
 
 	batchMode     bool
 	batchSelected map[string]bool
@@ -545,6 +546,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.mode = modeSearch
 			m.errText = ""
+			m.applyFilter()
 			return m, m.searchInput.Focus()
 		case "enter":
 			vis := m.visibleTorrents()

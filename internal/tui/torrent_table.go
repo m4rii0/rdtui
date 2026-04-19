@@ -170,21 +170,41 @@ func renderTableHeader(columns []columnSpec, sortCol int, sortAsc bool, width in
 	return truncateLine(strings.Join(cells, " "), width)
 }
 
-func renderTableRow(torrent models.Torrent, columns []columnSpec) string {
+func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices []int) string {
+	var fm map[int][]int
+	if len(matchIndices) > 0 {
+		fm = fieldMatchIndices(torrent, matchIndices)
+	}
 	cells := make([]string, len(columns))
 	for i, col := range columns {
 		var value string
 		switch col.Index {
 		case colStatus:
-			value = statusLabel(torrent.Status)
+			plain := statusLabelPlain(torrent.Status)
+			if fm != nil {
+				plain = highlightChars(plain, fm[colStatus], matchHighlightStyle)
+			}
+			value = styledStatusLabel(torrent.Status, plain)
 		case colProgress:
 			value = formatProgress(torrent.Progress)
+			if fm != nil {
+				value = highlightChars(value, fm[colProgress], matchHighlightStyle)
+			}
 		case colSize:
 			value = humanBytes(torrent.Bytes)
+			if fm != nil {
+				value = highlightChars(value, fm[colSize], matchHighlightStyle)
+			}
 		case colAdded:
 			value = formatAddedTime(torrent.Added)
+			if fm != nil {
+				value = highlightChars(value, fm[colAdded], matchHighlightStyle)
+			}
 		case colName:
 			value = torrent.Filename
+			if fm != nil {
+				value = highlightChars(value, fm[colName], matchHighlightStyle)
+			}
 		}
 		cells[i] = padVisual(value, col.Width, col.AlignRight)
 	}
@@ -253,6 +273,24 @@ func filterTorrents(torrents []models.Torrent, query string) []models.Torrent {
 	return result
 }
 
+type filterResult struct {
+	torrent models.Torrent
+	indices []int
+}
+
+func filterTorrentsWithMatches(torrents []models.Torrent, query string) []filterResult {
+	source := make([]string, len(torrents))
+	for i, t := range torrents {
+		source[i] = torrentMatchString(t)
+	}
+	matches := fuzzy.Find(query, source)
+	result := make([]filterResult, len(matches))
+	for i, match := range matches {
+		result[i] = filterResult{torrent: torrents[match.Index], indices: match.MatchedIndexes}
+	}
+	return result
+}
+
 func (m Model) visibleTorrents() []models.Torrent {
 	if m.filterApplied || m.mode == modeSearch {
 		return m.filteredTorrents
@@ -264,11 +302,76 @@ func (m *Model) applyFilter() {
 	query := m.searchInput.Value()
 	if query == "" {
 		m.filteredTorrents = append([]models.Torrent(nil), m.torrents...)
+		m.filterMatches = nil
 	} else {
-		m.filteredTorrents = filterTorrents(m.torrents, query)
+		results := filterTorrentsWithMatches(m.torrents, query)
+		m.filteredTorrents = make([]models.Torrent, len(results))
+		m.filterMatches = make(map[string][]int, len(results))
+		for i, r := range results {
+			m.filteredTorrents[i] = r.torrent
+			m.filterMatches[r.torrent.ID] = r.indices
+		}
 	}
 	sortTorrents(m.filteredTorrents, m.sortColumn, m.sortAscending)
 	if m.selectedIdx >= len(m.filteredTorrents) {
 		m.selectedIdx = max(0, len(m.filteredTorrents)-1)
 	}
+}
+
+func highlightChars(s string, indices []int, style lipgloss.Style) string {
+	if len(indices) == 0 {
+		return s
+	}
+	runes := []rune(s)
+	set := make(map[int]bool, len(indices))
+	for _, i := range indices {
+		if i >= 0 && i < len(runes) {
+			set[i] = true
+		}
+	}
+	var b strings.Builder
+	i := 0
+	for i < len(runes) {
+		if set[i] {
+			start := i
+			for i < len(runes) && set[i] {
+				i++
+			}
+			b.WriteString(style.Render(string(runes[start:i])))
+		} else {
+			b.WriteRune(runes[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+func fieldMatchIndices(t models.Torrent, matchIndices []int) map[int][]int {
+	fields := []struct {
+		col   int
+		value string
+	}{
+		{colStatus, statusLabelPlain(t.Status)},
+		{colProgress, formatProgress(t.Progress)},
+		{colSize, humanBytes(t.Bytes)},
+		{colName, t.Filename},
+		{colAdded, formatAddedTime(t.Added)},
+	}
+	offsets := make([]int, len(fields))
+	offset := 0
+	for i, f := range fields {
+		offsets[i] = offset
+		offset += len([]rune(f.value)) + 1
+	}
+	result := make(map[int][]int)
+	for _, idx := range matchIndices {
+		for i, start := range offsets {
+			end := start + len([]rune(fields[i].value))
+			if idx >= start && idx < end {
+				result[fields[i].col] = append(result[fields[i].col], idx-start)
+				break
+			}
+		}
+	}
+	return result
 }
