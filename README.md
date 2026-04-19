@@ -140,6 +140,10 @@ Batch imports preserve partial success: if some uploads fail, the successful tor
 go test ./...
 ```
 
+## Disclaimer
+
+This project does not contain any copyrighted material. It is a client application that solely makes API calls to the [Real-Debrid](https://real-debrid.com) service. All content accessed through this tool is hosted and served by Real-Debrid; this repository contains no media files, torrents, or pirated content of any kind.
+
 ## Notes
 
 - Real-Debrid rate-limits the API, so the UI uses conservative polling.
