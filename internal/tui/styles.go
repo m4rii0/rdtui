@@ -107,7 +107,7 @@ func renderBanner(version string) string {
 func renderCompactHeader(version, username string) string {
 	h := headStyle.Render("◆ rdtui")
 	if version != "" {
-		h += " " + versionStyle.Render("v"+version)
+		h += " " + versionStyle.Render("v") + subtleStyle.Render(version)
 	}
 	if username != "" {
 		h += "  " + subtleStyle.Render("▸") + " " + userStyle.Render(username)
