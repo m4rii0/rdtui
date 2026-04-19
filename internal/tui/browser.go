@@ -406,52 +406,68 @@ func (b fileBrowserState) view(width, height int) string {
 		return b.viewEditing(width, height)
 	}
 
-	maxContentHeight := height - 4
-	if maxContentHeight < 1 {
-		maxContentHeight = 1
+	listH := height - 5
+	if listH < 1 {
+		listH = 1
 	}
 
 	var lines []string
 
 	if b.Err != "" {
-		lines = append(lines, "", "Error: "+b.Err, "")
+		lines = append(lines, "")
+		lines = append(lines, padLines(1, "Error: "+b.Err)...)
+		lines = append(lines, padLines(listH-1, "")...)
 	} else {
 		lines = append(lines, "")
 		start, end := 0, len(b.Entries)
-		if len(b.Entries) > maxContentHeight {
-			start = b.Cursor - maxContentHeight/2
+		if len(b.Entries) > listH {
+			start = b.Cursor - listH/2
 			if start < 0 {
 				start = 0
 			}
-			end = start + maxContentHeight
+			end = start + listH
 			if end > len(b.Entries) {
 				end = len(b.Entries)
-				start = end - maxContentHeight
+				start = end - listH
 				if start < 0 {
 					start = 0
 				}
 			}
 		}
-		for idx := start; idx < end; idx++ {
-			entry := b.Entries[idx]
-			cursor := "  "
-			if idx == b.Cursor {
-				cursor = "> "
-			}
-			marker := "[ ] "
-			name := entry.Name
-			if entry.IsDir {
-				marker = "    "
-				name += "/"
+		thumbTop, thumbSize := scrollbarThumb(len(b.Entries), listH, start)
+		for i := 0; i < listH; i++ {
+			idx := start + i
+			if idx >= 0 && idx < end {
+				entry := b.Entries[idx]
+				cursor := "  "
+				if idx == b.Cursor {
+					cursor = "> "
+				}
+				marker := "[ ] "
+				name := entry.Name
+				if entry.IsDir {
+					marker = "    "
+					name += "/"
+				} else {
+					if _, ok := b.Selected[entry.Path]; ok {
+						marker = "[x] "
+					}
+					if entry.FileSize > 0 {
+						name += "  " + humanBrowserBytes(entry.FileSize)
+					}
+				}
+				row := cursor + marker + name
+				if len(b.Entries) > listH {
+					row = truncateBrowserLine(row, width-2) + " " + mutedStyle.Render(scrollbarGlyph(i, thumbTop, thumbSize))
+				}
+				lines = append(lines, row)
 			} else {
-				if _, ok := b.Selected[entry.Path]; ok {
-					marker = "[x] "
-				}
-				if entry.FileSize > 0 {
-					name += "  " + humanBrowserBytes(entry.FileSize)
+				if len(b.Entries) > listH {
+					lines = append(lines, mutedStyle.Render(scrollbarGlyph(i, thumbTop, thumbSize)))
+				} else {
+					lines = append(lines, "")
 				}
 			}
-			lines = append(lines, cursor+marker+name)
 		}
 	}
 
@@ -477,9 +493,9 @@ func (b fileBrowserState) view(width, height int) string {
 }
 
 func (b fileBrowserState) viewEditing(width, height int) string {
-	maxContentHeight := height - 6
-	if maxContentHeight < 1 {
-		maxContentHeight = 1
+	listH := height - 5
+	if listH < 1 {
+		listH = 1
 	}
 
 	var lines []string
@@ -488,35 +504,52 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 	entries := b.editCompletions
 	if len(entries) == 0 {
 		lines = append(lines, "  (no matches)")
+		for i := 1; i < listH; i++ {
+			lines = append(lines, "")
+		}
 	} else {
 		start, end := 0, len(entries)
-		if len(entries) > maxContentHeight {
-			start = b.editCursor - maxContentHeight/2
+		if len(entries) > listH {
+			start = b.editCursor - listH/2
 			if start < 0 {
 				start = 0
 			}
-			end = start + maxContentHeight
+			end = start + listH
 			if end > len(entries) {
 				end = len(entries)
-				start = end - maxContentHeight
+				start = end - listH
 				if start < 0 {
 					start = 0
 				}
 			}
 		}
-		for idx := start; idx < end; idx++ {
-			entry := entries[idx]
-			cursor := "  "
-			if idx == b.editCursor {
-				cursor = "> "
+		thumbTop, thumbSize := scrollbarThumb(len(entries), listH, start)
+		for i := 0; i < listH; i++ {
+			idx := start + i
+			if idx >= 0 && idx < end {
+				entry := entries[idx]
+				cursor := "  "
+				if idx == b.editCursor {
+					cursor = "> "
+				}
+				name := entry.Name
+				if entry.IsDir {
+					name += "/"
+				} else if entry.FileSize > 0 {
+					name += "  " + humanBrowserBytes(entry.FileSize)
+				}
+				row := cursor + name
+				if len(entries) > listH {
+					row = truncateBrowserLine(row, width-2) + " " + mutedStyle.Render(scrollbarGlyph(i, thumbTop, thumbSize))
+				}
+				lines = append(lines, row)
+			} else {
+				if len(entries) > listH {
+					lines = append(lines, mutedStyle.Render(scrollbarGlyph(i, thumbTop, thumbSize)))
+				} else {
+					lines = append(lines, "")
+				}
 			}
-			name := entry.Name
-			if entry.IsDir {
-				name += "/"
-			} else if entry.FileSize > 0 {
-				name += "  " + humanBrowserBytes(entry.FileSize)
-			}
-			lines = append(lines, cursor+name)
 		}
 	}
 
@@ -530,6 +563,27 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")
+}
+
+func padLines(n int, s string) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
+}
+
+func truncateBrowserLine(s string, maxW int) string {
+	if maxW < 1 {
+		return ""
+	}
+	if len(s) <= maxW {
+		return s
+	}
+	if maxW <= 3 {
+		return s[:maxW]
+	}
+	return s[:maxW-3] + "..."
 }
 
 func humanBrowserBytes(b int64) string {
