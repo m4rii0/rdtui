@@ -55,6 +55,23 @@ const (
 	handoffLaunch handoffAction = "launch"
 )
 
+type batchOp string
+
+const (
+	batchOpDelete batchOp = "delete"
+	batchOpCopy   batchOp = "copy"
+)
+
+type batchResultMsg struct {
+	op      batchOp
+	total   int
+	success int
+	failed  int
+	skipped int
+	detail  string
+	err     error
+}
+
 type selectFilesState struct {
 	Cursor   int
 	Files    []models.TorrentFile
@@ -86,6 +103,9 @@ type Model struct {
 	sortColumn    int
 	sortAscending bool
 
+	batchMode     bool
+	batchSelected map[string]bool
+
 	input       textinput.Model
 	inputPrompt string
 	inputAction inputAction
@@ -95,7 +115,7 @@ type Model struct {
 	selector   selectFilesState
 	targets    targetPickerState
 	showURL    string
-	deleteID   string
+	deleteIDs  []string
 }
 
 type bootstrapMsg struct {
@@ -168,6 +188,7 @@ func NewModel(service *app.Service) Model {
 		input:         ti,
 		sortColumn:    colAdded,
 		sortAscending: false,
+		batchSelected: map[string]bool{},
 	}
 }
 
@@ -348,8 +369,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeMain
 		m.status = "Deleted torrent"
 		m.errText = ""
-		m.deleteID = ""
+		m.deleteIDs = nil
 		return m, refreshCmd(m.service)
+
+	case batchResultMsg:
+		m.loading = false
+		switch msg.op {
+		case batchOpDelete:
+			if msg.err != nil {
+				m.errText = msg.err.Error()
+				return m, nil
+			}
+			m.mode = modeMain
+			if msg.failed > 0 {
+				m.status = fmt.Sprintf("Deleted %d/%d torrent(s)", msg.success, msg.total)
+			} else {
+				m.status = fmt.Sprintf("Deleted %d torrent(s)", msg.success)
+			}
+			if msg.detail != "" {
+				m.errText = strings.TrimSpace(msg.detail)
+			} else {
+				m.errText = ""
+			}
+			m.deleteIDs = nil
+			m.clearBatchSelection()
+			m.batchMode = false
+			return m, refreshCmd(m.service)
+		case batchOpCopy:
+			if msg.err != nil {
+				m.errText = msg.err.Error()
+				return m, nil
+			}
+			m.mode = modeMain
+			var parts []string
+			if msg.success > 0 {
+				parts = append(parts, fmt.Sprintf("Copied %d URL(s)", msg.success))
+			}
+			if msg.skipped > 0 {
+				parts = append(parts, fmt.Sprintf("%d skipped (not downloaded)", msg.skipped))
+			}
+			if msg.failed > 0 {
+				parts = append(parts, fmt.Sprintf("%d failed", msg.failed))
+			}
+			m.status = strings.Join(parts, ", ")
+			if msg.detail != "" {
+				m.errText = strings.TrimSpace(msg.detail)
+			} else {
+				m.errText = ""
+			}
+			m.clearBatchSelection()
+			m.batchMode = false
+			return m, nil
+		}
 
 	case handoffMsg:
 		m.loading = false
@@ -518,15 +589,55 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeSelectFiles
 			return m, nil
 		case "y":
+			if m.hasBatchSelection() {
+				ids := m.batchSelectedIDs()
+				m.loading = true
+				m.returnMode = modeMain
+				return m, batchOpCmd(m.service, batchOpCopy, ids, m.torrents)
+			}
 			m.returnMode = modeMain
 			return m.beginHandoff(handoffCopy)
+		case "b":
+			m.batchMode = !m.batchMode
+			if !m.batchMode {
+				m.clearBatchSelection()
+			}
+			m.errText = ""
+			return m, nil
+		case " ":
+			if m.batchMode && len(m.torrents) > 0 {
+				m.toggleBatchMark(m.selectedTorrentID())
+				return m, nil
+			}
+		case "ctrl+a":
+			if m.batchMode {
+				m.selectAllTorrents()
+				return m, nil
+			}
+		case "ctrl+d":
+			if m.batchMode {
+				m.clearBatchSelection()
+				return m, nil
+			}
+		case "esc":
+			if m.batchMode {
+				m.clearBatchSelection()
+				m.batchMode = false
+				return m, nil
+			}
 		case "x":
+			if m.hasBatchSelection() {
+				m.deleteIDs = m.batchSelectedIDs()
+				m.returnMode = modeMain
+				m.mode = modeDelete
+				return m, nil
+			}
 			if m.detail == nil {
 				return m, nil
 			}
 			m.returnMode = modeMain
 			m.mode = modeDelete
-			m.deleteID = m.detail.ID
+			m.deleteIDs = []string{m.detail.ID}
 			return m, nil
 		}
 
@@ -553,7 +664,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.returnMode = modeDetail
 			m.mode = modeDelete
-			m.deleteID = m.detail.ID
+			m.deleteIDs = []string{m.detail.ID}
 			return m, nil
 		case "r":
 			m.loading = true
@@ -665,11 +776,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "n":
 			m.mode = m.returnMode
-			m.deleteID = ""
+			m.deleteIDs = nil
 			return m, nil
 		case "y", "enter":
+			if len(m.deleteIDs) > 1 {
+				m.loading = true
+				ids := make([]string, len(m.deleteIDs))
+				copy(ids, m.deleteIDs)
+				return m, batchOpCmd(m.service, batchOpDelete, ids, m.torrents)
+			}
+			if len(m.deleteIDs) == 0 {
+				m.mode = m.returnMode
+				return m, nil
+			}
 			m.loading = true
-			return m, deleteCmd(m.service, m.deleteID)
+			return m, deleteCmd(m.service, m.deleteIDs[0])
 		}
 	}
 
@@ -708,6 +829,43 @@ func (m Model) selectedTorrentID() string {
 		return ""
 	}
 	return m.torrents[m.selectedIdx].ID
+}
+
+func (m *Model) hasBatchSelection() bool {
+	return len(m.batchSelected) > 0
+}
+
+func (m *Model) toggleBatchMark(id string) {
+	if id == "" {
+		return
+	}
+	if m.batchSelected[id] {
+		delete(m.batchSelected, id)
+	} else {
+		m.batchSelected[id] = true
+	}
+}
+
+func (m *Model) selectAllTorrents() {
+	for _, t := range m.torrents {
+		m.batchSelected[t.ID] = true
+	}
+}
+
+func (m *Model) clearBatchSelection() {
+	for k := range m.batchSelected {
+		delete(m.batchSelected, k)
+	}
+}
+
+func (m *Model) batchSelectedIDs() []string {
+	ids := make([]string, 0, len(m.batchSelected))
+	for _, t := range m.torrents {
+		if m.batchSelected[t.ID] {
+			ids = append(ids, t.ID)
+		}
+	}
+	return ids
 }
 
 func (m *Model) sortByColumn(col int) {
@@ -843,6 +1001,107 @@ func deleteCmd(service *app.Service, torrentID string) tea.Cmd {
 	return func() tea.Msg {
 		return deleteMsg{err: service.DeleteTorrent(context.Background(), torrentID)}
 	}
+}
+
+const batchDelay = 250 * time.Millisecond
+
+func batchTick(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(batchDelay):
+		return nil
+	}
+}
+
+func batchOpCmd(service *app.Service, op batchOp, ids []string, torrents []models.Torrent) tea.Cmd {
+	return func() tea.Msg {
+		switch op {
+		case batchOpDelete:
+			return executeBatchDelete(service, ids)
+		case batchOpCopy:
+			return executeBatchCopy(service, ids, torrents)
+		}
+		return batchResultMsg{op: op, err: fmt.Errorf("unknown operation: %s", op)}
+	}
+}
+
+func executeBatchDelete(service *app.Service, ids []string) batchResultMsg {
+	result := batchResultMsg{op: batchOpDelete, total: len(ids)}
+	for i, id := range ids {
+		if i > 0 {
+			if err := batchTick(context.Background()); err != nil {
+				result.failed = len(ids) - i
+				result.err = err
+				return result
+			}
+		}
+		if err := service.DeleteTorrent(context.Background(), id); err != nil {
+			result.failed++
+			result.detail += err.Error() + "\n"
+		} else {
+			result.success++
+		}
+	}
+	return result
+}
+
+func executeBatchCopy(service *app.Service, ids []string, torrents []models.Torrent) batchResultMsg {
+	result := batchResultMsg{op: batchOpCopy, total: len(ids)}
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	var urls []string
+	first := true
+	for _, t := range torrents {
+		if !idSet[t.ID] {
+			continue
+		}
+		if t.Status != "downloaded" {
+			result.skipped++
+			continue
+		}
+		if len(t.Links) == 0 {
+			result.skipped++
+			continue
+		}
+		for _, link := range t.Links {
+			if !first {
+				if err := batchTick(context.Background()); err != nil {
+					result.failed = result.total - result.success - result.skipped
+					result.err = err
+					return result
+				}
+			}
+			first = false
+			unrestricted, err := service.ResolveDirectURL(context.Background(), models.DownloadTarget{Link: link})
+			if err != nil {
+				result.failed++
+				result.detail += err.Error() + "\n"
+				continue
+			}
+			u := unrestricted.Download
+			if u == "" {
+				u = unrestricted.Link
+			}
+			if u != "" {
+				urls = append(urls, u)
+			}
+		}
+		result.success++
+	}
+	if len(urls) > 0 {
+		copied, err := service.CopyURL(strings.Join(urls, "\n"))
+		if err != nil {
+			result.err = err
+			return result
+		}
+		if !copied {
+			result.detail = "clipboard not available"
+		}
+	}
+	return result
 }
 
 func handoffCmd(service *app.Service, target models.DownloadTarget, action handoffAction) tea.Cmd {

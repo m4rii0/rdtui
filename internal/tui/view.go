@@ -12,19 +12,20 @@ import (
 )
 
 var (
-	appStyle              = lipgloss.NewStyle().Padding(1, 2)
-	headStyle             = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	mutedStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	errorStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
-	okStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	boxStyle              = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	selectedStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
-	headerRowStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
-	headerSelColStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
+	appStyle               = lipgloss.NewStyle().Padding(1, 2)
+	headStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	mutedStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	errorStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
+	okStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	boxStyle               = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+	selectedStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
+	headerRowStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
+	headerSelColStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
 	statusDownloadedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusDownloadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
 	statusWaitingStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	statusErrorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	batchMarkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("237"))
 )
 
 func renderView(m Model) string {
@@ -59,7 +60,7 @@ func renderView(m Model) string {
 func renderAuthChoice(m Model) string {
 	title := headStyle.Render("rdtui")
 	if m.version != "" {
-		title += " " + mutedStyle.Render("v" + m.version)
+		title += " " + mutedStyle.Render("v"+m.version)
 	}
 	lines := []string{
 		title,
@@ -82,7 +83,7 @@ func renderAuthChoice(m Model) string {
 func renderInput(m Model) string {
 	title := headStyle.Render("rdtui")
 	if m.version != "" {
-		title += " " + mutedStyle.Render("v" + m.version)
+		title += " " + mutedStyle.Render("v"+m.version)
 	}
 	lines := []string{
 		title,
@@ -101,7 +102,7 @@ func renderInput(m Model) string {
 func renderDeviceAuth(m Model) string {
 	title := headStyle.Render("rdtui")
 	if m.version != "" {
-		title += " " + mutedStyle.Render("v" + m.version)
+		title += " " + mutedStyle.Render("v"+m.version)
 	}
 	lines := []string{
 		title,
@@ -156,10 +157,10 @@ func renderMain(m Model) string {
 
 	header := headStyle.Render("rdtui")
 	if m.version != "" {
-		header += " " + mutedStyle.Render("v" + m.version)
+		header += " " + mutedStyle.Render("v"+m.version)
 	}
 	if m.session != nil {
-		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
+		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
 	}
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
@@ -174,7 +175,7 @@ func renderMain(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, listFooter())
+	lines = append(lines, listFooter(m))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -190,10 +191,10 @@ func renderDetailView(m Model) string {
 
 	header := headStyle.Render("rdtui")
 	if m.version != "" {
-		header += " " + mutedStyle.Render("v" + m.version)
+		header += " " + mutedStyle.Render("v"+m.version)
 	}
 	if m.session != nil {
-		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
+		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
 	}
 
 	lines := []string{header, ""}
@@ -262,19 +263,34 @@ func renderTorrentList(m Model, width, height int) string {
 	title := headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents)))
 	bodyHeight := max(1, height-2)
 	showScrollbar := len(m.torrents) > bodyHeight
-	columns := tableColumns(width, showScrollbar)
-	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, width)
+	colWidth := width
+	if m.batchMode {
+		colWidth -= 2
+	}
+	columns := tableColumns(colWidth, showScrollbar)
+	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
 	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, bodyHeight)
 	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), bodyHeight, start)
 
 	var bodyLines []string
 	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
-		rowStr := renderTableRow(m.torrents[idx], columns)
+		t := m.torrents[idx]
+		mark := ""
+		if m.batchMode {
+			if m.batchSelected[t.ID] {
+				mark = "* "
+			} else {
+				mark = "  "
+			}
+		}
+		rowStr := mark + renderTableRow(t, columns)
 		if showScrollbar {
 			rowStr = truncateLine(rowStr, max(1, width-2)) + " " + mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize))
 		}
 		if idx == m.selectedIdx {
 			rowStr = selectedStyle.Width(width).Render(truncateLine(rowStr, width))
+		} else if m.batchMode && m.batchSelected[t.ID] {
+			rowStr = batchMarkedStyle.Width(width).Render(truncateLine(rowStr, width))
 		} else {
 			rowStr = truncateLine(rowStr, width)
 		}
@@ -326,8 +342,18 @@ func renderModal(m Model) string {
 	case modeShowURL:
 		return strings.Join([]string{"Direct URL", "", m.showURL, "", mutedStyle.Render("Enter/Esc to close")}, "\n")
 	case modeDelete:
-		name := m.deleteID
-		if m.detail != nil {
+		if len(m.deleteIDs) > 1 {
+			return strings.Join([]string{
+				fmt.Sprintf("Delete %d torrent(s)?", len(m.deleteIDs)),
+				"",
+				mutedStyle.Render("y/Enter=delete  n/Esc=cancel"),
+			}, "\n")
+		}
+		name := ""
+		if len(m.deleteIDs) > 0 {
+			name = m.deleteIDs[0]
+		}
+		if m.detail != nil && m.detail.ID == name {
 			name = m.detail.Filename
 		}
 		return strings.Join([]string{fmt.Sprintf("Delete torrent '%s'?", name), "", mutedStyle.Render("y/Enter=delete  n/Esc=cancel")}, "\n")
@@ -335,8 +361,11 @@ func renderModal(m Model) string {
 	return ""
 }
 
-func listFooter() string {
-	return mutedStyle.Render("↑↓ j/k  enter=view  S/P/Z/D/N=sort  r=refresh  m magnet  u url  i import  s select  y copy  x delete  q quit")
+func listFooter(m Model) string {
+	if m.batchMode {
+		return mutedStyle.Render(fmt.Sprintf("[BATCH] space=mark  ctrl+a=all  ctrl+d=clear  x=delete  y=copy  b/esc=exit  │  Marked: %d", len(m.batchSelected)))
+	}
+	return mutedStyle.Render("↑↓ j/k  enter=view  S/P/Z/D/N=sort  r=refresh  m magnet  u url  i import  b batch  s select  y copy  x delete  q quit")
 }
 
 func detailFooter() string {

@@ -285,8 +285,8 @@ func TestDeleteFromMainView(t *testing.T) {
 	if m.mode != modeDelete {
 		t.Fatalf("mode = %q, want modeDelete after x", m.mode)
 	}
-	if m.deleteID != "a" {
-		t.Fatalf("deleteID = %q, want a", m.deleteID)
+	if len(m.deleteIDs) != 1 || m.deleteIDs[0] != "a" {
+		t.Fatalf("deleteIDs = %v, want [a]", m.deleteIDs)
 	}
 }
 
@@ -294,7 +294,7 @@ func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 	m := Model{
 		mode:       modeDelete,
 		returnMode: modeDetail,
-		deleteID:   "a",
+		deleteIDs:  []string{"a"},
 	}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
@@ -308,7 +308,7 @@ func TestDeleteSuccessReturnsToMain(t *testing.T) {
 	m := Model{
 		mode:       modeDelete,
 		returnMode: modeDetail,
-		deleteID:   "a",
+		deleteIDs:  []string{"a"},
 	}
 
 	updated, _ := m.Update(deleteMsg{err: nil})
@@ -329,5 +329,138 @@ func TestModalReturnsToReturnMode(t *testing.T) {
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail after modal cancel", m.mode)
+	}
+}
+
+func TestBatchModeToggle(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx:   0,
+		batchSelected: map[string]bool{},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = updated.(Model)
+	if !m.batchMode {
+		t.Fatal("expected batch mode active after pressing b")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = updated.(Model)
+	if m.batchMode {
+		t.Fatal("expected batch mode inactive after pressing b again")
+	}
+	if len(m.batchSelected) != 0 {
+		t.Fatal("expected batch selection cleared when exiting batch mode")
+	}
+}
+
+func TestBatchSpaceTogglesMark(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx:   0,
+		batchSelected: map[string]bool{},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(Model)
+	if !m.batchSelected["a"] {
+		t.Fatal("expected torrent 'a' marked after space")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(Model)
+	if m.batchSelected["a"] {
+		t.Fatal("expected torrent 'a' unmarked after second space")
+	}
+}
+
+func TestBatchDeleteEntersConfirmation(t *testing.T) {
+	m := Model{
+		mode:       modeMain,
+		batchMode:  true,
+		sortColumn: colAdded,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "b", Filename: "test2", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx:   0,
+		batchSelected: map[string]bool{"a": true, "b": true},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if m.mode != modeDelete {
+		t.Fatalf("mode = %q, want modeDelete after x with batch selection", m.mode)
+	}
+	if len(m.deleteIDs) != 2 {
+		t.Fatalf("deleteIDs len = %d, want 2", len(m.deleteIDs))
+	}
+}
+
+func TestBatchEscapeClearsSelection(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.batchMode {
+		t.Fatal("expected batch mode off after esc")
+	}
+	if len(m.batchSelected) != 0 {
+		t.Fatal("expected batch selection cleared after esc")
+	}
+}
+
+func TestSelectAllTorrents(t *testing.T) {
+	m := Model{
+		mode:       modeMain,
+		batchMode:  true,
+		sortColumn: colAdded,
+		torrents: []models.Torrent{
+			{ID: "a", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "b", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+		},
+		batchSelected: map[string]bool{},
+	}
+	m.selectAllTorrents()
+	if len(m.batchSelected) != 2 {
+		t.Fatalf("batchSelected len = %d, want 2", len(m.batchSelected))
+	}
+	if !m.batchSelected["a"] || !m.batchSelected["b"] {
+		t.Fatal("expected both torrents selected")
+	}
+}
+
+func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
+	m := Model{
+		sortColumn: colAdded,
+		torrents: []models.Torrent{
+			{ID: "c", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
+			{ID: "a", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "b", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+		},
+		batchSelected: map[string]bool{"b": true, "a": true},
+	}
+	ids := m.batchSelectedIDs()
+	if len(ids) != 2 {
+		t.Fatalf("ids len = %d, want 2", len(ids))
+	}
+	if ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("ids = %v, want [a b] (torrent list order)", ids)
 	}
 }
