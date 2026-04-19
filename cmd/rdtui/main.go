@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/internal/tui"
@@ -28,7 +28,7 @@ func main() {
 		_ = service.Close()
 	}()
 
-	program := tea.NewProgram(tui.NewModel(service), tea.WithAltScreen())
+	program := tea.NewProgram(tui.NewModel(service))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "rdtui error: %v\n", err)
 		os.Exit(1)

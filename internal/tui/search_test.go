@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -88,7 +88,7 @@ func TestSlashEntersSearchMode(t *testing.T) {
 	}
 	m.selectedIdx = 0
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(Model)
 	if m.mode != modeSearch {
 		t.Fatalf("mode = %q, want modeSearch after /", m.mode)
@@ -109,7 +109,7 @@ func TestSlashPreservesQueryWhenFilterApplied(t *testing.T) {
 	m.filterApplied = true
 	m.searchInput.SetValue("test")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(Model)
 	if m.mode != modeSearch {
 		t.Fatalf("mode = %q, want modeSearch", m.mode)
@@ -135,7 +135,7 @@ func TestEscapeClearsFilter(t *testing.T) {
 	}
 	m.searchInput.SetValue("test")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want modeMain after Esc", m.mode)
@@ -168,7 +168,7 @@ func TestEnterKeepsFilter(t *testing.T) {
 	}
 	m.searchInput.SetValue("alpha")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want modeMain after Enter", m.mode)
@@ -198,7 +198,7 @@ func TestEnterWithEmptyQueryClearsFilter(t *testing.T) {
 	}
 	m.searchInput.Reset()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want modeMain", m.mode)

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -188,7 +188,7 @@ func TestEnterOpensDetailView(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail after Enter", m.mode)
@@ -210,7 +210,7 @@ func TestEnterWithCachedDetail(t *testing.T) {
 		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a"}},
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail after Enter", m.mode)
@@ -231,7 +231,7 @@ func TestEscapeReturnsToList(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want modeMain after ESC", m.mode)
@@ -261,7 +261,8 @@ func TestShiftLetterSortShortcuts(t *testing.T) {
 		{"N", colName},
 	}
 	for _, tt := range tests {
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
+		r := []rune(tt.key)[0]
+		updated, _ := m.Update(tea.KeyPressMsg{Code: r, Text: tt.key})
 		m = updated.(Model)
 		if m.sortColumn != tt.want {
 			t.Fatalf("after %s: sortColumn = %d, want %d", tt.key, m.sortColumn, tt.want)
@@ -282,7 +283,7 @@ func TestDeleteFromMainView(t *testing.T) {
 		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a", Filename: "test"}},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(Model)
 	if m.mode != modeDelete {
 		t.Fatalf("mode = %q, want modeDelete after x", m.mode)
@@ -302,7 +303,7 @@ func TestDownloadFromMainViewOpensTargetPicker(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(Model)
 	if m.mode != modeChooseTarget {
 		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
@@ -322,7 +323,7 @@ func TestDownloadFromDetailViewOpensTargetPicker(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(Model)
 	if m.mode != modeChooseTarget {
 		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
@@ -402,7 +403,7 @@ func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail", m.mode)
@@ -443,7 +444,7 @@ func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
 		downloadTorrentID: "torrent-1",
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(Model)
 	if m.mode != modeDelete {
 		t.Fatalf("mode = %q, want modeDelete", m.mode)
@@ -463,7 +464,7 @@ func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 		deleteIDs:  []string{"a"},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail after cancel", m.mode)
@@ -491,7 +492,7 @@ func TestModalReturnsToReturnMode(t *testing.T) {
 		selector:   selectFilesState{Files: []models.TorrentFile{}, Selected: map[int]bool{}},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.mode != modeDetail {
 		t.Fatalf("mode = %q, want modeDetail after modal cancel", m.mode)
@@ -510,13 +511,13 @@ func TestBatchModeToggle(t *testing.T) {
 		batchSelected: map[string]bool{},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	m = updated.(Model)
 	if !m.batchMode {
 		t.Fatal("expected batch mode active after pressing b")
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	m = updated.(Model)
 	if m.batchMode {
 		t.Fatal("expected batch mode inactive after pressing b again")
@@ -539,13 +540,13 @@ func TestBatchSpaceTogglesMark(t *testing.T) {
 		batchSelected: map[string]bool{},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	m = updated.(Model)
 	if !m.batchSelected["a"] {
 		t.Fatal("expected torrent 'a' marked after space")
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	m = updated.(Model)
 	if m.batchSelected["a"] {
 		t.Fatal("expected torrent 'a' unmarked after second space")
@@ -565,7 +566,7 @@ func TestBatchDeleteEntersConfirmation(t *testing.T) {
 		batchSelected: map[string]bool{"a": true, "b": true},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(Model)
 	if m.mode != modeDelete {
 		t.Fatalf("mode = %q, want modeDelete after x with batch selection", m.mode)
@@ -582,7 +583,7 @@ func TestBatchEscapeClearsSelection(t *testing.T) {
 		batchSelected: map[string]bool{"a": true},
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if m.batchMode {
 		t.Fatal("expected batch mode off after esc")

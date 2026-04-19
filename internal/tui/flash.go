@@ -3,8 +3,8 @@ package tui
 import (
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/lipgloss/v2"
+	tea "charm.land/bubbletea/v2"
 )
 
 type flashLevel int

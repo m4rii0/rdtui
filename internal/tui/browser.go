@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/textinput"
 	"github.com/m4rii0/rdtui/internal/debug"
 )
 
@@ -46,7 +46,7 @@ func newFileBrowser(startDir string) fileBrowserState {
 	pi := textinput.New()
 	pi.Prompt = ""
 	pi.Placeholder = "type path..."
-	pi.Width = 60
+	pi.SetWidth(60)
 	state := fileBrowserState{CurrentDir: abs, Selected: map[string]struct{}{}, pathInput: pi}
 	state.reload()
 	return state

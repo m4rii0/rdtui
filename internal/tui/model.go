@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/debug"
@@ -224,11 +224,11 @@ type downloadTickMsg time.Time
 func NewModel(service *app.Service) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Width = 64
+	ti.SetWidth(64)
 	si := textinput.New()
 	si.Prompt = "/"
 	si.Placeholder = "search..."
-	si.Width = 40
+	si.SetWidth(40)
 	return Model{
 		service:       service,
 		version:       version.Version,
@@ -588,7 +588,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		prevMode := m.mode
 		model, cmd := m.handleKey(msg)
 		if mm, ok := model.(Model); ok && mm.mode != prevMode {
@@ -607,7 +607,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	debug.Log("handleKey: key=%q mode=%s", msg.String(), m.mode)
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
@@ -782,7 +782,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.errText = ""
 			return m, nil
-		case " ":
+		case "space":
 			if m.batchMode && len(m.visibleTorrents()) > 0 {
 				m.toggleBatchMark(m.selectedTorrentID())
 				return m, nil
@@ -937,7 +937,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.browser.move(1)
 		case "enter", "right", "l":
 			m.browser.openCurrent()
-		case " ":
+		case "space":
 			m.browser.toggleCurrent()
 		case "/":
 			m.browser.startEditing()
@@ -983,7 +983,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.selector.Cursor < len(m.selector.Files)-1 {
 				m.selector.Cursor++
 			}
-		case " ":
+		case "space":
 			m.selector.toggleCurrent()
 		case "ctrl+a":
 			for _, file := range m.selector.Files {
@@ -1131,8 +1131,10 @@ func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
-func (m Model) View() string {
-	return renderView(m)
+func (m Model) View() tea.View {
+	v := tea.NewView(renderView(m))
+	v.AltScreen = true
+	return v
 }
 
 func (m Model) selectedTorrentID() string {
