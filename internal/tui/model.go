@@ -894,8 +894,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeFileBrowser:
 		m.errText = ""
 		key := msg.String()
-		debug.Log("handler: fileBrowser key=%q cursor=%d entries=%d selected=%d visual=%v",
-			key, m.browser.Cursor, len(m.browser.Entries), len(m.browser.Selected), m.browser.VisualMode)
+		debug.Log("handler: fileBrowser key=%q cursor=%d entries=%d selected=%d visual=%v editing=%v",
+			key, m.browser.Cursor, len(m.browser.Entries), len(m.browser.Selected), m.browser.VisualMode, m.browser.EditingPath)
+
+		if m.browser.EditingPath {
+			switch key {
+			case "esc":
+				m.browser.stopEditing()
+				m.browser.reload()
+				return m, nil
+			case "enter":
+				_, _, errMsg := m.browser.confirmPath()
+				if errMsg != "" {
+					m.errText = errMsg
+				} else {
+					m.errText = ""
+				}
+				return m, nil
+			case "tab":
+				m.browser.tabComplete()
+				return m, nil
+			case "up", "k":
+				m.browser.moveEditCursor(-1)
+				return m, nil
+			case "down", "j":
+				m.browser.moveEditCursor(1)
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.browser.pathInput, cmd = m.browser.pathInput.Update(msg)
+			m.browser.updateCompletions()
+			return m, cmd
+		}
+
 		switch key {
 		case "esc":
 			m.mode = modeMain
@@ -908,6 +939,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.browser.openCurrent()
 		case " ":
 			m.browser.toggleCurrent()
+		case "e":
+			m.browser.startEditing()
 		case "V":
 			m.browser.toggleVisual()
 		case "ctrl+a":

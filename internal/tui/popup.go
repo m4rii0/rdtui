@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -28,6 +29,56 @@ func renderOverlay(termW, termH int, content string) string {
 		return content
 	}
 	return lipgloss.Place(termW, termH, lipgloss.Center, lipgloss.Center, content)
+}
+
+func renderOverlayOnBackground(bg, popup string, termW, termH int) string {
+	if termW <= 0 {
+		termW = 80
+	}
+	if termH <= 0 {
+		termH = 24
+	}
+	if termW < 40 || termH < 12 {
+		return popup
+	}
+
+	popLines := strings.Split(popup, "\n")
+	popH := len(popLines)
+	popW := 0
+	for _, l := range popLines {
+		if w := lipgloss.Width(l); w > popW {
+			popW = w
+		}
+	}
+
+	startRow := max(0, (termH-popH)/2)
+	startCol := max(0, (termW-popW)/2)
+
+	bgLines := strings.Split(bg, "\n")
+	for len(bgLines) < termH {
+		bgLines = append(bgLines, "")
+	}
+
+	result := make([]string, len(bgLines))
+	copy(result, bgLines)
+
+	for i, popLine := range popLines {
+		row := startRow + i
+		if row >= len(result) {
+			break
+		}
+		if lipgloss.Width(popLine) == 0 {
+			continue
+		}
+		left := ansi.Truncate(result[row], startCol, "")
+		leftW := lipgloss.Width(left)
+		if leftW < startCol {
+			left += strings.Repeat(" ", startCol-leftW)
+		}
+		result[row] = left + popLine
+	}
+
+	return strings.Join(result, "\n")
 }
 
 func popupBox(title, content string, width int, danger bool) string {
@@ -108,6 +159,9 @@ func renderFileBrowserContent(m Model) string {
 	innerH := popupH - 2
 
 	title := headStyle.Render(" Import: " + m.browser.CurrentDir + " ")
+	if m.browser.EditingPath {
+		title = headStyle.Render(" Import: edit path ")
+	}
 	content := m.browser.view(innerW, innerH)
 	if m.errText != "" {
 		content += "\n" + errorStyle.Render(m.errText)

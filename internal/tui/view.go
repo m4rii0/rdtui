@@ -37,8 +37,8 @@ var (
 func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
 	if isPopupMode(m.mode) {
-		_ = appStyle.Render(renderBackground(m))
-		return renderOverlay(m.width, m.height, renderPopupContent(m))
+		bg := appStyle.Render(renderBackground(m))
+		return renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height)
 	}
 	return appStyle.Render(renderBackground(m))
 }

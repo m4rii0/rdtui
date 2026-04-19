@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/m4rii0/rdtui/internal/debug"
 )
 
@@ -26,6 +27,11 @@ type fileBrowserState struct {
 	ShowHidden   bool
 	VisualMode   bool
 	VisualAnchor int
+
+	pathInput    textinput.Model
+	EditingPath  bool
+	editCompletions []browserEntry
+	editCursor   int
 }
 
 func newFileBrowser(startDir string) fileBrowserState {
@@ -37,7 +43,11 @@ func newFileBrowser(startDir string) fileBrowserState {
 		abs = startDir
 	}
 	debug.Log("newFileBrowser: startDir=%s abs=%s", startDir, abs)
-	state := fileBrowserState{CurrentDir: abs, Selected: map[string]struct{}{}}
+	pi := textinput.New()
+	pi.Prompt = ""
+	pi.Placeholder = "type path..."
+	pi.Width = 60
+	state := fileBrowserState{CurrentDir: abs, Selected: map[string]struct{}{}, pathInput: pi}
 	state.reload()
 	return state
 }
@@ -210,9 +220,204 @@ func (b *fileBrowserState) selectedPaths() []string {
 	return out
 }
 
+func (b *fileBrowserState) startEditing() {
+	b.pathInput.SetValue(b.CurrentDir + string(os.PathSeparator))
+	b.EditingPath = true
+	b.editCursor = 0
+	b.updateCompletions()
+	b.pathInput.Focus()
+}
+
+func (b *fileBrowserState) stopEditing() {
+	b.EditingPath = false
+	b.pathInput.Blur()
+	b.editCompletions = nil
+	b.editCursor = 0
+}
+
+func (b *fileBrowserState) updateCompletions() {
+	raw := b.pathInput.Value()
+	dirPart, prefix := splitPathInput(raw)
+	if dirPart == "" {
+		dirPart = "."
+	}
+	abs, err := filepath.Abs(dirPart)
+	if err != nil {
+		b.editCompletions = nil
+		return
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		b.editCompletions = nil
+		return
+	}
+	b.editCompletions = nil
+	for _, entry := range entries {
+		name := entry.Name()
+		if !b.ShowHidden && strings.HasPrefix(name, ".") {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
+			continue
+		}
+		isDir := entry.IsDir()
+		isTorrent := strings.EqualFold(filepath.Ext(name), ".torrent")
+		if !isDir && !isTorrent {
+			continue
+		}
+		var size int64
+		if isTorrent {
+			if info, err := entry.Info(); err == nil {
+				size = info.Size()
+			}
+		}
+		b.editCompletions = append(b.editCompletions, browserEntry{
+			Name:     name,
+			Path:     filepath.Join(abs, name),
+			IsDir:    isDir,
+			FileSize: size,
+		})
+	}
+	sort.SliceStable(b.editCompletions, func(i, j int) bool {
+		if b.editCompletions[i].IsDir != b.editCompletions[j].IsDir {
+			return b.editCompletions[i].IsDir
+		}
+		return strings.ToLower(b.editCompletions[i].Name) < strings.ToLower(b.editCompletions[j].Name)
+	})
+	if b.editCursor >= len(b.editCompletions) {
+		b.editCursor = max(0, len(b.editCompletions)-1)
+	}
+}
+
+func (b *fileBrowserState) tabComplete() {
+	if len(b.editCompletions) == 0 {
+		return
+	}
+	raw := b.pathInput.Value()
+	dirPart, _ := splitPathInput(raw)
+	if dirPart == "" {
+		dirPart = "."
+	}
+
+	names := make([]string, len(b.editCompletions))
+	for i, e := range b.editCompletions {
+		suffix := e.Name
+		if e.IsDir {
+			suffix += string(os.PathSeparator)
+		}
+		names[i] = suffix
+	}
+	common := longestCommonPrefix(names)
+	if common == "" {
+		return
+	}
+	newVal := dirPart + string(os.PathSeparator) + common
+	b.pathInput.SetValue(newVal)
+	b.pathInput.CursorEnd()
+	b.updateCompletions()
+}
+
+func (b *fileBrowserState) confirmPath() (navigate bool, selectFile string, errMsg string) {
+	if len(b.editCompletions) > 0 && b.editCursor >= 0 && b.editCursor < len(b.editCompletions) {
+		highlighted := b.editCompletions[b.editCursor]
+		typedVal := strings.TrimSpace(b.pathInput.Value())
+		typedAbs, _ := filepath.Abs(typedVal)
+		if typedVal == "" || typedAbs == highlighted.Path || strings.HasPrefix(highlighted.Path, typedAbs+string(os.PathSeparator)) {
+			if highlighted.IsDir {
+				b.CurrentDir = highlighted.Path
+				b.VisualMode = false
+				b.pathInput.SetValue(highlighted.Path + string(os.PathSeparator))
+				b.pathInput.CursorEnd()
+				b.reload()
+				b.updateCompletions()
+				b.editCursor = 0
+				return true, "", ""
+			}
+			if strings.EqualFold(filepath.Ext(highlighted.Path), ".torrent") {
+				b.Selected[highlighted.Path] = struct{}{}
+				b.stopEditing()
+				b.reload()
+				return false, highlighted.Path, ""
+			}
+		}
+	}
+
+	raw := strings.TrimSpace(b.pathInput.Value())
+	if raw == "" {
+		return false, "", "path cannot be empty"
+	}
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return false, "", "path does not exist: " + abs
+	}
+	if info.IsDir() {
+		b.CurrentDir = abs
+		b.VisualMode = false
+		b.pathInput.SetValue(abs + string(os.PathSeparator))
+		b.pathInput.CursorEnd()
+		b.reload()
+		b.updateCompletions()
+		b.editCursor = 0
+		return true, "", ""
+	}
+	if strings.EqualFold(filepath.Ext(abs), ".torrent") {
+		b.Selected[abs] = struct{}{}
+		b.stopEditing()
+		b.reload()
+		return false, abs, ""
+	}
+	return false, "", "not a .torrent file or directory"
+}
+
+func (b *fileBrowserState) moveEditCursor(delta int) {
+	if len(b.editCompletions) == 0 {
+		return
+	}
+	b.editCursor += delta
+	if b.editCursor < 0 {
+		b.editCursor = 0
+	}
+	if b.editCursor >= len(b.editCompletions) {
+		b.editCursor = len(b.editCompletions) - 1
+	}
+}
+
+func splitPathInput(raw string) (dir, prefix string) {
+	idx := strings.LastIndex(raw, string(os.PathSeparator))
+	if idx < 0 {
+		return ".", raw
+	}
+	return raw[:idx], raw[idx+1:]
+}
+
+func longestCommonPrefix(strs []string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	prefix := strs[0]
+	for _, s := range strs[1:] {
+		for !strings.HasPrefix(strings.ToLower(s), strings.ToLower(prefix)) {
+			prefix = prefix[:len(prefix)-1]
+			if prefix == "" {
+				return ""
+			}
+		}
+	}
+	return prefix
+}
+
 func (b fileBrowserState) view(width, height int) string {
-	debug.Log("browser.view: width=%d height=%d entries=%d cursor=%d selected=%d err=%q",
-		width, height, len(b.Entries), b.Cursor, len(b.Selected), b.Err)
+	debug.Log("browser.view: width=%d height=%d entries=%d cursor=%d selected=%d err=%q editing=%v",
+		width, height, len(b.Entries), b.Cursor, len(b.Selected), b.Err, b.EditingPath)
+
+	if b.EditingPath {
+		return b.viewEditing(width, height)
+	}
+
 	maxContentHeight := height - 4
 	if maxContentHeight < 1 {
 		maxContentHeight = 1
@@ -262,12 +467,78 @@ func (b fileBrowserState) view(width, height int) string {
 		}
 	}
 
-	footer := "enter=open/toggle  space=toggle  V=visual  ctrl+a=all  ctrl+d=clear  H=hidden  ctrl+s=import  esc=cancel"
+	footer := renderFooterShortcuts(
+		shortcutHint{Key: "e", Desc: "edit path"},
+		shortcutHint{Key: "enter", Desc: "open/toggle"},
+		shortcutHint{Key: "space", Desc: "toggle"},
+		shortcutHint{Key: "V", Desc: "visual"},
+		shortcutHint{Key: "ctrl+a", Desc: "all"},
+		shortcutHint{Key: "ctrl+d", Desc: "clear"},
+		shortcutHint{Key: "H", Desc: "hidden"},
+		shortcutHint{Key: "ctrl+s", Desc: "import"},
+		shortcutHint{Key: "esc", Desc: "cancel"},
+	)
 	if b.VisualMode {
-		footer = "[VISUAL] " + footer
+		footer = headStyle.Render("[VISUAL]") + " " + footer
 	}
-	footer += fmt.Sprintf("  │  Selected: %d", len(b.Selected))
+	footer += footerSepStyle.Render("  │  ") + footerDescStyle.Render(fmt.Sprintf("Selected: %d", len(b.Selected)))
 
+	lines = append(lines, "", footer)
+
+	return strings.Join(lines, "\n")
+}
+
+func (b fileBrowserState) viewEditing(width, height int) string {
+	maxContentHeight := height - 6
+	if maxContentHeight < 1 {
+		maxContentHeight = 1
+	}
+
+	var lines []string
+	lines = append(lines, b.pathInput.View())
+
+	entries := b.editCompletions
+	if len(entries) == 0 {
+		lines = append(lines, "  (no matches)")
+	} else {
+		start, end := 0, len(entries)
+		if len(entries) > maxContentHeight {
+			start = b.editCursor - maxContentHeight/2
+			if start < 0 {
+				start = 0
+			}
+			end = start + maxContentHeight
+			if end > len(entries) {
+				end = len(entries)
+				start = end - maxContentHeight
+				if start < 0 {
+					start = 0
+				}
+			}
+		}
+		for idx := start; idx < end; idx++ {
+			entry := entries[idx]
+			cursor := "  "
+			if idx == b.editCursor {
+				cursor = "> "
+			}
+			name := entry.Name
+			if entry.IsDir {
+				name += "/"
+			} else if entry.FileSize > 0 {
+				name += "  " + humanBrowserBytes(entry.FileSize)
+			}
+			lines = append(lines, cursor+name)
+		}
+	}
+
+	footer := headStyle.Render("[EDITING PATH]") + " " + renderFooterShortcuts(
+		shortcutHint{Key: "tab", Desc: "complete"},
+		shortcutHint{Key: "↑↓", Desc: "pick"},
+		shortcutHint{Key: "enter", Desc: "navigate/select"},
+		shortcutHint{Key: "esc", Desc: "cancel edit"},
+	)
+	footer += footerSepStyle.Render("  │  ") + footerDescStyle.Render(fmt.Sprintf("Selected: %d", len(b.Selected)))
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")
