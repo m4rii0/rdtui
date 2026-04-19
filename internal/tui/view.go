@@ -26,6 +26,7 @@ var (
 	statusWaitingStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	statusErrorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	batchMarkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("237"))
+	searchStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
 )
 
 func renderView(m Model) string {
@@ -45,7 +46,7 @@ func renderView(m Model) string {
 		body = renderDeviceAuth(m)
 	case modeDetail:
 		body = renderDetailView(m)
-	case modeMain:
+	case modeMain, modeSearch:
 		body = renderMain(m)
 	default:
 		if m.returnMode == modeDetail {
@@ -153,6 +154,9 @@ func renderMain(m Model) string {
 	if m.loading {
 		reserved++
 	}
+	if m.mode == modeSearch || m.filterApplied {
+		reserved++
+	}
 	tableHeight := max(4, bodyHeight-reserved)
 
 	header := headStyle.Render("rdtui")
@@ -166,6 +170,9 @@ func renderMain(m Model) string {
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
 	lines := []string{header, "", table}
+	if bar := renderSearchBar(m); bar != "" {
+		lines = append(lines, bar)
+	}
 	if m.status != "" {
 		lines = append(lines, mutedStyle.Render(m.status))
 	}
@@ -253,28 +260,36 @@ func renderTorrentList(m Model, width, height int) string {
 	if width <= 0 {
 		width = 20
 	}
-	if len(m.torrents) == 0 {
+	vis := m.visibleTorrents()
+	if len(vis) == 0 {
+		if m.filterApplied || m.mode == modeSearch {
+			return strings.Join(fitLines([]string{
+				headStyle.Render(fmt.Sprintf("Torrents [%d/%d]", 0, len(m.torrents))),
+				"",
+				mutedStyle.Render("No matches"),
+			}, height), "\n")
+		}
 		return strings.Join(fitLines([]string{
 			headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents))),
 			"",
 			mutedStyle.Render("No torrents loaded"),
 		}, height), "\n")
 	}
-	title := headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents)))
+	title := headStyle.Render(fmt.Sprintf("Torrents [%d]", len(vis)))
 	bodyHeight := max(1, height-2)
-	showScrollbar := len(m.torrents) > bodyHeight
+	showScrollbar := len(vis) > bodyHeight
 	colWidth := width
 	if m.batchMode {
 		colWidth -= 2
 	}
 	columns := tableColumns(colWidth, showScrollbar)
 	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
-	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, bodyHeight)
-	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), bodyHeight, start)
+	start, end := torrentListWindow(len(vis), m.selectedIdx, bodyHeight)
+	thumbTop, thumbSize := scrollbarThumb(len(vis), bodyHeight, start)
 
 	var bodyLines []string
 	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
-		t := m.torrents[idx]
+		t := vis[idx]
 		mark := ""
 		if m.batchMode {
 			if m.batchSelected[t.ID] {
@@ -361,11 +376,23 @@ func renderModal(m Model) string {
 	return ""
 }
 
+func renderSearchBar(m Model) string {
+	if m.mode != modeSearch && !m.filterApplied {
+		return ""
+	}
+	vis := m.visibleTorrents()
+	count := fmt.Sprintf("%d/%d", len(vis), len(m.torrents))
+	return m.searchInput.View() + " " + mutedStyle.Render("["+count+"]")
+}
+
 func listFooter(m Model) string {
+	if m.mode == modeSearch {
+		return mutedStyle.Render("esc=clear  enter=keep  ↑↓ navigate  type to filter")
+	}
 	if m.batchMode {
 		return mutedStyle.Render(fmt.Sprintf("[BATCH] space=mark  ctrl+a=all  ctrl+d=clear  x=delete  y=copy  b/esc=exit  │  Marked: %d", len(m.batchSelected)))
 	}
-	return mutedStyle.Render("↑↓ j/k  enter=view  S/P/Z/D/N=sort  r=refresh  m magnet  u url  i import  b batch  s select  y copy  x delete  q quit")
+	return mutedStyle.Render("↑↓ j/k enter S/P/Z/D/N=sort /search r=refresh m magnet u url i import b batch s select y copy x delete q")
 }
 
 func detailFooter() string {

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/pkg/models"
+	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -200,4 +201,74 @@ func padVisual(content string, width int, alignRight bool) string {
 		return pad + content
 	}
 	return content + pad
+}
+
+func statusLabelPlain(status string) string {
+	switch status {
+	case "downloaded":
+		return "DONE"
+	case "downloading":
+		return "DL"
+	case "queued":
+		return "QD"
+	case "compressing":
+		return "CMP"
+	case "uploading":
+		return "UL"
+	case "waiting_files_selection":
+		return "WAIT"
+	case "error":
+		return "ERR"
+	case "dead":
+		return "DEAD"
+	case "virus":
+		return "VIRUS"
+	case "magnet_error":
+		return "MAGERR"
+	default:
+		return status
+	}
+}
+
+func torrentMatchString(t models.Torrent) string {
+	return strings.Join([]string{
+		statusLabelPlain(t.Status),
+		formatProgress(t.Progress),
+		humanBytes(t.Bytes),
+		t.Filename,
+		formatAddedTime(t.Added),
+	}, " ")
+}
+
+func filterTorrents(torrents []models.Torrent, query string) []models.Torrent {
+	source := make([]string, len(torrents))
+	for i, t := range torrents {
+		source[i] = torrentMatchString(t)
+	}
+	matches := fuzzy.Find(query, source)
+	result := make([]models.Torrent, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, torrents[match.Index])
+	}
+	return result
+}
+
+func (m Model) visibleTorrents() []models.Torrent {
+	if m.filterApplied || m.mode == modeSearch {
+		return m.filteredTorrents
+	}
+	return m.torrents
+}
+
+func (m *Model) applyFilter() {
+	query := m.searchInput.Value()
+	if query == "" {
+		m.filteredTorrents = append([]models.Torrent(nil), m.torrents...)
+	} else {
+		m.filteredTorrents = filterTorrents(m.torrents, query)
+	}
+	sortTorrents(m.filteredTorrents, m.sortColumn, m.sortAscending)
+	if m.selectedIdx >= len(m.filteredTorrents) {
+		m.selectedIdx = max(0, len(m.filteredTorrents)-1)
+	}
 }

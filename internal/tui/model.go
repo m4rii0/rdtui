@@ -37,6 +37,7 @@ const (
 	modeSelectFiles  mode = "select-files"
 	modeChooseTarget mode = "choose-target"
 	modeShowURL      mode = "show-url"
+	modeSearch       mode = "search"
 	modeDelete       mode = "delete"
 )
 
@@ -97,11 +98,13 @@ type Model struct {
 	errText    string
 	session    *models.AuthSession
 
-	torrents      []models.Torrent
-	selectedIdx   int
-	detail        *models.TorrentInfo
-	sortColumn    int
-	sortAscending bool
+	torrents        []models.Torrent
+	filteredTorrents []models.Torrent
+	selectedIdx     int
+	detail          *models.TorrentInfo
+	sortColumn      int
+	sortAscending   bool
+	filterApplied   bool
 
 	batchMode     bool
 	batchSelected map[string]bool
@@ -109,6 +112,7 @@ type Model struct {
 	input       textinput.Model
 	inputPrompt string
 	inputAction inputAction
+	searchInput textinput.Model
 
 	deviceCode *models.DeviceCode
 	browser    fileBrowserState
@@ -180,12 +184,17 @@ func NewModel(service *app.Service) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.Width = 64
+	si := textinput.New()
+	si.Prompt = "/"
+	si.Placeholder = "search..."
+	si.Width = 40
 	return Model{
 		service:       service,
 		version:       version.Version,
 		mode:          modeStarting,
 		returnMode:    modeMain,
 		input:         ti,
+		searchInput:   si,
 		sortColumn:    colAdded,
 		sortAscending: false,
 		batchSelected: map[string]bool{},
@@ -274,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if m.mode == modeMain || m.mode == modeDetail {
+		if m.mode == modeMain || m.mode == modeDetail || m.mode == modeSearch {
 			return m, tea.Batch(refreshCmd(m.service), tickCmd())
 		}
 		return m, tickCmd()
@@ -294,7 +303,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selectedID := m.selectedTorrentID()
 		m.torrents = append([]models.Torrent(nil), msg.torrents...)
 		sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
-		m.selectedIdx = selectedIndexForID(m.torrents, selectedID)
+		if m.filterApplied || m.mode == modeSearch {
+			m.applyFilter()
+		}
+		m.selectedIdx = selectedIndexForID(m.visibleTorrents(), selectedID)
 		m.errText = ""
 		if len(m.torrents) == 0 {
 			m.detail = nil
@@ -447,6 +459,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if m.needsTextInputUpdate() {
 		m.input, cmd = m.input.Update(msg)
+	} else if m.mode == modeSearch {
+		m.searchInput, cmd = m.searchInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -518,9 +532,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeMain:
 		switch msg.String() {
 		case "q":
+			if m.filterApplied {
+				m.filterApplied = false
+				m.filteredTorrents = nil
+				m.selectedIdx = 0
+				return m, nil
+			}
 			return m, tea.Quit
+		case "/":
+			if !m.filterApplied {
+				m.searchInput.Reset()
+			}
+			m.mode = modeSearch
+			m.errText = ""
+			return m, m.searchInput.Focus()
 		case "enter":
-			if len(m.torrents) == 0 {
+			vis := m.visibleTorrents()
+			if len(vis) == 0 {
 				return m, nil
 			}
 			m.mode = modeDetail
@@ -535,7 +563,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, detailCmd(m.service, m.selectedTorrentID())
 			}
 		case "down", "j":
-			if m.selectedIdx < len(m.torrents)-1 {
+			vis := m.visibleTorrents()
+			if m.selectedIdx < len(vis)-1 {
 				m.selectedIdx++
 				return m, detailCmd(m.service, m.selectedTorrentID())
 			}
@@ -605,7 +634,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errText = ""
 			return m, nil
 		case " ":
-			if m.batchMode && len(m.torrents) > 0 {
+			if m.batchMode && len(m.visibleTorrents()) > 0 {
 				m.toggleBatchMark(m.selectedTorrentID())
 				return m, nil
 			}
@@ -640,6 +669,45 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteIDs = []string{m.detail.ID}
 			return m, nil
 		}
+
+	case modeSearch:
+		switch msg.String() {
+		case "esc":
+			m.searchInput.Blur()
+			m.searchInput.Reset()
+			m.filterApplied = false
+			m.filteredTorrents = nil
+			m.selectedIdx = 0
+			m.mode = modeMain
+			return m, nil
+		case "enter":
+			if m.searchInput.Value() == "" {
+				m.filterApplied = false
+				m.filteredTorrents = nil
+			} else {
+				m.filterApplied = true
+				m.searchInput.Blur()
+			}
+			m.mode = modeMain
+			return m, nil
+		case "up", "k":
+			if m.selectedIdx > 0 {
+				m.selectedIdx--
+				return m, detailCmd(m.service, m.selectedTorrentID())
+			}
+			return m, nil
+		case "down", "j":
+			vis := m.visibleTorrents()
+			if m.selectedIdx < len(vis)-1 {
+				m.selectedIdx++
+				return m, detailCmd(m.service, m.selectedTorrentID())
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		m.applyFilter()
+		return m, cmd
 
 	case modeDetail:
 		switch msg.String() {
@@ -825,10 +893,11 @@ func (m Model) View() string {
 }
 
 func (m Model) selectedTorrentID() string {
-	if len(m.torrents) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.torrents) {
+	vis := m.visibleTorrents()
+	if len(vis) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(vis) {
 		return ""
 	}
-	return m.torrents[m.selectedIdx].ID
+	return vis[m.selectedIdx].ID
 }
 
 func (m *Model) hasBatchSelection() bool {
@@ -847,7 +916,7 @@ func (m *Model) toggleBatchMark(id string) {
 }
 
 func (m *Model) selectAllTorrents() {
-	for _, t := range m.torrents {
+	for _, t := range m.visibleTorrents() {
 		m.batchSelected[t.ID] = true
 	}
 }
@@ -860,7 +929,7 @@ func (m *Model) clearBatchSelection() {
 
 func (m *Model) batchSelectedIDs() []string {
 	ids := make([]string, 0, len(m.batchSelected))
-	for _, t := range m.torrents {
+	for _, t := range m.visibleTorrents() {
 		if m.batchSelected[t.ID] {
 			ids = append(ids, t.ID)
 		}
@@ -877,7 +946,10 @@ func (m *Model) sortByColumn(col int) {
 		m.sortAscending = false
 	}
 	sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
-	m.selectedIdx = selectedIndexForID(m.torrents, selectedID)
+	if m.filterApplied || m.mode == modeSearch {
+		m.applyFilter()
+	}
+	m.selectedIdx = selectedIndexForID(m.visibleTorrents(), selectedID)
 	dir := "↓"
 	if m.sortAscending {
 		dir = "↑"
