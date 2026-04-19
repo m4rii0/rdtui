@@ -1,0 +1,10 @@
+bin/
+
+# Go test artifacts
+*.test
+coverage.out
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
