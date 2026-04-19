@@ -48,13 +48,13 @@
 
 ## 8. UI Rework: k9s-style Navigation
 
-- [ ] 8.1 Replace the two-pane master-detail layout with a single full-width torrent table in the main view.
-- [ ] 8.2 Add a new `modeDetail` mode with a full-screen torrent detail view. Enter from the list opens this view; ESC returns to the list.
-- [ ] 8.3 Rebind Enter in the main view to open the detail view instead of sorting by column.
-- [ ] 8.4 Remove column selection (h/l navigation, `selectedColumn` field). Remove the `moveColumnSelection` method.
-- [ ] 8.5 Implement direct Shift+letter sorting shortcuts: `S` Status, `P` Progress, `Z` Size, `D` Date, `N` Name. Each toggles direction when pressed again.
-- [ ] 8.6 Add a context-sensitive footer that is always visible. List view footer: `↑↓ j/k enter=view S/P/Z/D/N=sort r=refresh m/u/i y/x q=quit`. Detail view footer: `esc=back s=select y=copy x=delete r=refresh`.
-- [ ] 8.7 Make torrent actions (s=select files, y=copy URL, x=delete) available from both the list view and the detail view. Rebind delete to `x` (was `d`).
-- [ ] 8.8 Update `renderTorrentList` to use full terminal width. Remove `torrentListPaneWidth` and two-pane layout helpers.
-- [ ] 8.9 Update `renderTableHeader` to remove column selection highlighting. Keep sort direction indicators (↑/↓).
-- [ ] 8.10 Update tests for new key bindings, mode transitions (Enter→detail, ESC→list), and direct sort shortcuts.
+- [x] 8.1 Replace the two-pane master-detail layout with a single full-width torrent table in the main view.
+- [x] 8.2 Add a new `modeDetail` mode with a full-screen torrent detail view. Enter from the list opens this view; ESC returns to the list.
+- [x] 8.3 Rebind Enter in the main view to open the detail view instead of sorting by column.
+- [x] 8.4 Remove column selection (h/l navigation, `selectedColumn` field). Remove the `moveColumnSelection` method.
+- [x] 8.5 Implement direct Shift+letter sorting shortcuts: `S` Status, `P` Progress, `Z` Size, `D` Date, `N` Name. Each toggles direction when pressed again.
+- [x] 8.6 Add a context-sensitive footer that is always visible. List view footer: `↑↓ j/k enter=view S/P/Z/D/N=sort r=refresh m/u/i y/x q=quit`. Detail view footer: `esc=back s=select y=copy x=delete r=refresh`.
+- [x] 8.7 Make torrent actions (s=select files, y=copy URL, x=delete) available from both the list view and the detail view. Rebind delete to `x` (was `d`).
+- [x] 8.8 Update `renderTorrentList` to use full terminal width. Remove `torrentListPaneWidth` and two-pane layout helpers.
+- [x] 8.9 Update `renderTableHeader` to remove column selection highlighting. Keep sort direction indicators (↑/↓).
+- [x] 8.10 Update tests for new key bindings, mode transitions (Enter→detail, ESC→list), and direct sort shortcuts.

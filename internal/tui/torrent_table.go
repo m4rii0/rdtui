@@ -29,7 +29,7 @@ func tableColumns(totalWidth int, showScrollbar bool) []columnSpec {
 	statusW := 10
 	progressW := 6
 	sizeW := 9
-	addedW := 10
+	addedW := 16
 	scrollW := 0
 	if showScrollbar {
 		scrollW = 2
