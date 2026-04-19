@@ -28,6 +28,7 @@ const (
 	modeTokenInput   mode = "token-input"
 	modeDeviceAuth   mode = "device-auth"
 	modeMain         mode = "main"
+	modeDetail       mode = "detail"
 	modeMagnetInput  mode = "magnet-input"
 	modeURLInput     mode = "url-input"
 	modeFileBrowser  mode = "file-browser"
@@ -67,20 +68,20 @@ type targetPickerState struct {
 type Model struct {
 	service *app.Service
 
-	mode    mode
-	width   int
-	height  int
-	loading bool
-	status  string
-	errText string
-	session *models.AuthSession
+	mode       mode
+	returnMode mode
+	width      int
+	height     int
+	loading    bool
+	status     string
+	errText    string
+	session    *models.AuthSession
 
-	torrents       []models.Torrent
-	selectedIdx    int
-	detail         *models.TorrentInfo
-	selectedColumn int
-	sortColumn     int
-	sortAscending  bool
+	torrents      []models.Torrent
+	selectedIdx   int
+	detail        *models.TorrentInfo
+	sortColumn    int
+	sortAscending bool
 
 	input       textinput.Model
 	inputPrompt string
@@ -157,12 +158,12 @@ func NewModel(service *app.Service) Model {
 	ti.Prompt = "> "
 	ti.Width = 64
 	return Model{
-		service:        service,
-		mode:           modeStarting,
-		input:          ti,
-		sortColumn:     colAdded,
-		selectedColumn: colAdded,
-		sortAscending:  false,
+		service:       service,
+		mode:          modeStarting,
+		returnMode:    modeMain,
+		input:         ti,
+		sortColumn:    colAdded,
+		sortAscending: false,
 	}
 }
 
@@ -247,10 +248,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if m.mode == modeMain {
+		if m.mode == modeMain || m.mode == modeDetail {
 			return m, tea.Batch(refreshCmd(m.service), tickCmd())
 		}
-		return m, nil
+		return m, tickCmd()
 
 	case devicePollTickMsg:
 		if m.deviceCode != nil && m.mode == modeDeviceAuth {
@@ -328,7 +329,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errText = msg.err.Error()
 			return m, nil
 		}
-		m.mode = modeMain
+		m.mode = m.returnMode
 		m.status = "Updated torrent file selection"
 		m.errText = ""
 		return m, refreshCmd(m.service)
@@ -441,14 +442,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			return m, tea.Quit
-		case "left", "h":
-			m.moveColumnSelection(-1)
-			return m, nil
-		case "right", "l":
-			m.moveColumnSelection(1)
-			return m, nil
 		case "enter":
-			m.sortSelectedColumn()
+			if len(m.torrents) == 0 {
+				return m, nil
+			}
+			m.mode = modeDetail
+			if m.detail == nil || m.detail.ID != m.selectedTorrentID() {
+				m.loading = true
+				return m, detailCmd(m.service, m.selectedTorrentID())
+			}
 			return m, nil
 		case "up", "k":
 			if m.selectedIdx > 0 {
@@ -460,6 +462,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.selectedIdx++
 				return m, detailCmd(m.service, m.selectedTorrentID())
 			}
+		case "S":
+			m.sortByColumn(colStatus)
+			return m, nil
+		case "P":
+			m.sortByColumn(colProgress)
+			return m, nil
+		case "Z":
+			m.sortByColumn(colSize)
+			return m, nil
+		case "D":
+			m.sortByColumn(colAdded)
+			return m, nil
+		case "N":
+			m.sortByColumn(colName)
+			return m, nil
 		case "r":
 			m.loading = true
 			return m, refreshCmd(m.service)
@@ -490,20 +507,51 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errText = "Selected torrent is not waiting for file selection"
 				return m, nil
 			}
+			m.returnMode = modeMain
 			m.selector = newSelectFilesState(*m.detail)
 			m.mode = modeSelectFiles
 			return m, nil
 		case "y":
+			m.returnMode = modeMain
 			return m.beginHandoff(handoffCopy)
 		case "x":
-			return m.beginHandoff(handoffLaunch)
-		case "d":
 			if m.detail == nil {
 				return m, nil
 			}
+			m.returnMode = modeMain
 			m.mode = modeDelete
 			m.deleteID = m.detail.ID
 			return m, nil
+		}
+
+	case modeDetail:
+		switch msg.String() {
+		case "esc":
+			m.mode = modeMain
+			return m, nil
+		case "s":
+			if m.detail == nil || m.detail.Status != "waiting_files_selection" {
+				m.errText = "Selected torrent is not waiting for file selection"
+				return m, nil
+			}
+			m.returnMode = modeDetail
+			m.selector = newSelectFilesState(*m.detail)
+			m.mode = modeSelectFiles
+			return m, nil
+		case "y":
+			m.returnMode = modeDetail
+			return m.beginHandoff(handoffCopy)
+		case "x":
+			if m.detail == nil {
+				return m, nil
+			}
+			m.returnMode = modeDetail
+			m.mode = modeDelete
+			m.deleteID = m.detail.ID
+			return m, nil
+		case "r":
+			m.loading = true
+			return m, refreshCmd(m.service)
 		}
 
 	case modeFileBrowser:
@@ -541,7 +589,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeSelectFiles:
 		switch msg.String() {
 		case "esc":
-			m.mode = modeMain
+			m.mode = m.returnMode
 			return m, nil
 		case "up", "k":
 			if m.selector.Cursor > 0 {
@@ -567,7 +615,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeChooseTarget:
 		switch msg.String() {
 		case "esc":
-			m.mode = modeMain
+			m.mode = m.returnMode
 			return m, nil
 		case "up", "k":
 			if m.targets.Cursor > 0 {
@@ -589,14 +637,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeShowURL:
 		switch msg.String() {
 		case "esc", "enter":
-			m.mode = modeMain
+			m.mode = m.returnMode
 			return m, nil
 		}
 
 	case modeDelete:
 		switch msg.String() {
 		case "esc", "n":
-			m.mode = modeMain
+			m.mode = m.returnMode
 			m.deleteID = ""
 			return m, nil
 		case "y", "enter":
@@ -642,12 +690,12 @@ func (m Model) selectedTorrentID() string {
 	return m.torrents[m.selectedIdx].ID
 }
 
-func (m *Model) sortSelectedColumn() {
+func (m *Model) sortByColumn(col int) {
 	selectedID := m.selectedTorrentID()
-	if m.sortColumn == m.selectedColumn {
+	if m.sortColumn == col {
 		m.sortAscending = !m.sortAscending
 	} else {
-		m.sortColumn = m.selectedColumn
+		m.sortColumn = col
 		m.sortAscending = false
 	}
 	sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
@@ -658,16 +706,6 @@ func (m *Model) sortSelectedColumn() {
 	}
 	m.status = "Sorted by " + columnLabel(m.sortColumn) + " " + dir
 	m.errText = ""
-}
-
-func (m *Model) moveColumnSelection(delta int) {
-	m.selectedColumn += delta
-	if m.selectedColumn < 0 {
-		m.selectedColumn = columnCount - 1
-	}
-	if m.selectedColumn >= columnCount {
-		m.selectedColumn = 0
-	}
 }
 
 func (m Model) needsTextInputUpdate() bool {

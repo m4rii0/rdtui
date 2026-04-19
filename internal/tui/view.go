@@ -36,8 +36,16 @@ func renderView(m Model) string {
 		body = renderInput(m)
 	case modeDeviceAuth:
 		body = renderDeviceAuth(m)
-	default:
+	case modeDetail:
+		body = renderDetailView(m)
+	case modeMain:
 		body = renderMain(m)
+	default:
+		if m.returnMode == modeDetail {
+			body = renderDetailView(m)
+		} else {
+			body = renderMain(m)
+		}
 	}
 	return appStyle.Render(body)
 }
@@ -106,28 +114,38 @@ func renderDeviceAuth(m Model) string {
 }
 
 func renderMain(m Model) string {
-	paneHeight := mainPaneHeight(m)
 	width := m.width
 	if width <= 0 {
 		width = 120
 	}
-	leftWidth := torrentListPaneWidth(width)
-	rightWidth := max(40, width-leftWidth-6)
-	leftInnerWidth := max(10, leftWidth-boxStyle.GetHorizontalFrameSize())
-	rightInnerWidth := max(10, rightWidth-boxStyle.GetHorizontalFrameSize())
-	left := renderTorrentList(m, leftInnerWidth, paneHeight)
-	right := renderTorrentDetail(m, rightInnerWidth, paneHeight)
-	leftBox := boxStyle.Width(leftWidth).Render(left)
-	rightBox := boxStyle.Width(rightWidth).Render(right)
-	content := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "  ", rightBox)
+	innerWidth := width - 4
 
-	lines := []string{headStyle.Render("rdtui")}
-	if m.session != nil {
-		lines[0] += "  " + mutedStyle.Render("user: "+m.session.User.Username)
+	bodyHeight := m.height - 2
+	if bodyHeight <= 0 {
+		bodyHeight = 24
 	}
-	lines = append(lines, "", content)
+	reserved := 3
 	if m.status != "" {
-		lines = append(lines, "", mutedStyle.Render(m.status))
+		reserved++
+	}
+	if m.errText != "" {
+		reserved++
+	}
+	if m.loading {
+		reserved++
+	}
+	tableHeight := max(4, bodyHeight-reserved)
+
+	header := headStyle.Render("rdtui")
+	if m.session != nil {
+		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
+	}
+
+	table := renderTorrentList(m, innerWidth, tableHeight)
+
+	lines := []string{header, "", table}
+	if m.status != "" {
+		lines = append(lines, mutedStyle.Render(m.status))
 	}
 	if m.errText != "" {
 		lines = append(lines, errorStyle.Render(m.errText))
@@ -135,7 +153,68 @@ func renderMain(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, "", mutedStyle.Render("j/k rows  h/l cols  enter sort  r refresh  m magnet  u url  i import  s select  y copy  x launch  d delete  q quit"))
+	lines = append(lines, listFooter())
+	if m.loading {
+		lines = append(lines, mutedStyle.Render("Working..."))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderDetailView(m Model) string {
+	width := m.width
+	if width <= 0 {
+		width = 120
+	}
+	innerWidth := max(20, width-4)
+
+	header := headStyle.Render("rdtui")
+	if m.session != nil {
+		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
+	}
+
+	lines := []string{header, ""}
+
+	if m.detail == nil {
+		lines = append(lines, mutedStyle.Render("Loading torrent details..."))
+	} else {
+		info := m.detail
+		detailLines := []string{
+			"Details",
+			"",
+			fmt.Sprintf("  Name:     %s", info.Filename),
+			fmt.Sprintf("  Status:   %s", styledStatus(info.Status)),
+			fmt.Sprintf("  Progress: %s%%", formatProgress(info.Progress)),
+			fmt.Sprintf("  Size:     %s", humanBytes(max64(info.Bytes, info.OriginalBytes))),
+		}
+		if !info.Added.IsZero() {
+			detailLines = append(detailLines, fmt.Sprintf("  Added:    %s", info.Added.Format(time.RFC822)))
+		}
+		if len(info.Files) > 0 {
+			detailLines = append(detailLines, "", "  Files:")
+			for _, file := range info.Files {
+				marker := "[ ]"
+				if file.Selected {
+					marker = "[x]"
+				}
+				detailLines = append(detailLines, fmt.Sprintf("    %s %s (%s)", marker, file.Path, humanBytes(file.Bytes)))
+			}
+		}
+		if len(info.Links) > 0 {
+			detailLines = append(detailLines, "", fmt.Sprintf("  Generated links: %d", len(info.Links)))
+		}
+		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(detailLines, "\n")))
+	}
+
+	if m.status != "" {
+		lines = append(lines, mutedStyle.Render(m.status))
+	}
+	if m.errText != "" {
+		lines = append(lines, errorStyle.Render(m.errText))
+	}
+	if modal := renderModal(m); modal != "" {
+		lines = append(lines, "", boxStyle.Render(modal))
+	}
+	lines = append(lines, detailFooter())
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -150,12 +229,17 @@ func renderTorrentList(m Model, width, height int) string {
 		width = 20
 	}
 	if len(m.torrents) == 0 {
-		return strings.Join(fitLines([]string{"Torrents", "", mutedStyle.Render("No torrents loaded")}, height), "\n")
+		return strings.Join(fitLines([]string{
+			headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents))),
+			"",
+			mutedStyle.Render("No torrents loaded"),
+		}, height), "\n")
 	}
+	title := headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents)))
 	bodyHeight := max(1, height-2)
 	showScrollbar := len(m.torrents) > bodyHeight
 	columns := tableColumns(width, showScrollbar)
-	header := renderTableHeader(columns, m.selectedColumn, m.sortColumn, m.sortAscending, width)
+	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, width)
 	start, end := torrentListWindow(len(m.torrents), m.selectedIdx, bodyHeight)
 	thumbTop, thumbSize := scrollbarThumb(len(m.torrents), bodyHeight, start)
 
@@ -173,47 +257,9 @@ func renderTorrentList(m Model, width, height int) string {
 		bodyLines = append(bodyLines, rowStr)
 	}
 
-	lines := []string{"Torrents", header}
+	lines := []string{title, header}
 	lines = append(lines, bodyLines...)
 	return strings.Join(fitLines(lines, height), "\n")
-}
-
-func renderTorrentDetail(m Model, width, height int) string {
-	if height <= 0 {
-		height = 20
-	}
-	if width <= 0 {
-		width = 20
-	}
-	if m.detail == nil {
-		return strings.Join(fitLines(truncateLines([]string{"Torrent Details", "", "Select a torrent to view details."}, width), height), "\n")
-	}
-	info := m.detail
-	lines := []string{
-		"Details",
-		"",
-		fmt.Sprintf("Name: %s", info.Filename),
-		fmt.Sprintf("Status: %s", styledStatus(info.Status)),
-		fmt.Sprintf("Progress: %s%%", formatProgress(info.Progress)),
-		fmt.Sprintf("Size: %s", humanBytes(max64(info.Bytes, info.OriginalBytes))),
-	}
-	if !info.Added.IsZero() {
-		lines = append(lines, fmt.Sprintf("Added: %s", info.Added.Format(time.RFC822)))
-	}
-	if len(info.Files) > 0 {
-		lines = append(lines, "", "Files:")
-		for _, file := range info.Files {
-			marker := "[ ]"
-			if file.Selected {
-				marker = "[x]"
-			}
-			lines = append(lines, fmt.Sprintf("%s %s (%s)", marker, file.Path, humanBytes(file.Bytes)))
-		}
-	}
-	if len(info.Links) > 0 {
-		lines = append(lines, "", fmt.Sprintf("Generated links: %d", len(info.Links)))
-	}
-	return strings.Join(fitLines(truncateLines(lines, width), height), "\n")
 }
 
 func renderModal(m Model) string {
@@ -268,6 +314,14 @@ func renderModal(m Model) string {
 	return ""
 }
 
+func listFooter() string {
+	return mutedStyle.Render("↑↓ j/k  enter=view  S/P/Z/D/N=sort  r=refresh  m magnet  u url  i import  s select  y copy  x delete  q quit")
+}
+
+func detailFooter() string {
+	return mutedStyle.Render("esc=back  s=select  y=copy  x=delete  r=refresh")
+}
+
 func statusGlyph(status string) string {
 	switch status {
 	case "downloaded":
@@ -315,7 +369,7 @@ func formatAddedTime(value time.Time) string {
 	if value.IsZero() {
 		return "-"
 	}
-	return value.Local().Format("2006-01-02")
+	return value.Local().Format("02/01/2006 15:04")
 }
 
 func formatProgress(progress float64) string {
@@ -323,23 +377,6 @@ func formatProgress(progress float64) string {
 		return fmt.Sprintf("%.0f", progress)
 	}
 	return fmt.Sprintf("%.2f", progress)
-}
-
-func mainPaneHeight(m Model) int {
-	if m.height <= 0 {
-		return 20
-	}
-	reserved := 8
-	if m.status != "" {
-		reserved++
-	}
-	if m.errText != "" {
-		reserved++
-	}
-	if m.loading {
-		reserved++
-	}
-	return max(8, m.height-reserved)
 }
 
 func torrentListWindow(total, selected, visible int) (int, int) {
@@ -423,18 +460,6 @@ func truncateLine(line string, width int) string {
 		return ""
 	}
 	return ansi.Truncate(line, width, "…")
-}
-
-func torrentListPaneWidth(totalWidth int) int {
-	leftWidth := max(52, (totalWidth*3)/5)
-	maxLeft := totalWidth - 46
-	if maxLeft < 34 {
-		return max(34, totalWidth/2)
-	}
-	if leftWidth > maxLeft {
-		leftWidth = maxLeft
-	}
-	return leftWidth
 }
 
 func compactTorrentStatus(status string) string {

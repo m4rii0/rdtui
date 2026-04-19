@@ -46,15 +46,14 @@ func TestScrollbarThumbFitsVisibleTrack(t *testing.T) {
 
 func TestRenderViewHeightWithManyTorrents(t *testing.T) {
 	m := Model{
-		mode:           modeMain,
-		width:          120,
-		height:         24,
-		selectedIdx:    35,
-		selectedColumn: colAdded,
-		sortColumn:     colAdded,
-		sortAscending:  false,
-		session:        &models.AuthSession{User: models.User{Username: "debug"}},
-		detail:         &models.TorrentInfo{Torrent: models.Torrent{Filename: "selected torrent", Status: "downloading", Progress: 99.67}, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
+		mode:          modeMain,
+		width:         120,
+		height:        24,
+		selectedIdx:   35,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		session:       &models.AuthSession{User: models.User{Username: "debug"}},
+		detail:        &models.TorrentInfo{Torrent: models.Torrent{Filename: "selected torrent", Status: "downloading", Progress: 99.67}, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
 	}
 	for i := 0; i < 80; i++ {
 		m.torrents = append(m.torrents, models.Torrent{
@@ -84,16 +83,15 @@ func TestLongNamesDoNotWrap(t *testing.T) {
 		Bytes:    1024,
 	}
 	m := Model{
-		mode:           modeMain,
-		width:          120,
-		height:         24,
-		selectedIdx:    0,
-		selectedColumn: colAdded,
-		sortColumn:     colAdded,
-		sortAscending:  false,
-		session:        &models.AuthSession{User: models.User{Username: "test"}},
-		torrents:       []models.Torrent{torrent},
-		detail:         &models.TorrentInfo{Torrent: torrent, OriginalBytes: 1024},
+		mode:          modeMain,
+		width:         120,
+		height:        24,
+		selectedIdx:   0,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		session:       &models.AuthSession{User: models.User{Username: "test"}},
+		torrents:      []models.Torrent{torrent},
+		detail:        &models.TorrentInfo{Torrent: torrent, OriginalBytes: 1024},
 	}
 
 	view := renderView(m)
@@ -129,17 +127,17 @@ func TestTableColumnsWidthsSumValid(t *testing.T) {
 func TestRenderTableHeaderShowsSortArrow(t *testing.T) {
 	cols := tableColumns(80, false)
 
-	h := renderTableHeader(cols, colAdded, colAdded, false, 80)
+	h := renderTableHeader(cols, colAdded, false, 80)
 	if !strings.Contains(h, "↓") {
 		t.Fatal("descending sort should show ↓")
 	}
 
-	h = renderTableHeader(cols, colAdded, colAdded, true, 80)
+	h = renderTableHeader(cols, colAdded, true, 80)
 	if !strings.Contains(h, "↑") {
 		t.Fatal("ascending sort should show ↑")
 	}
 
-	h = renderTableHeader(cols, colAdded, colSize, false, 80)
+	h = renderTableHeader(cols, colSize, false, 80)
 	if strings.Contains(h, "↓") {
 		glyphs := strings.Count(h, "↓") + strings.Count(h, "↑")
 		if glyphs > 1 {

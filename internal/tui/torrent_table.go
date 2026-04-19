@@ -13,8 +13,8 @@ const (
 	colStatus   = 0
 	colProgress = 1
 	colSize     = 2
-	colAdded    = 3
-	colName     = 4
+	colName     = 3
+	colAdded    = 4
 	columnCount = 5
 )
 
@@ -51,8 +51,8 @@ func tableColumns(totalWidth int, showScrollbar bool) []columnSpec {
 		{Index: colStatus, Label: "Status", Width: statusW},
 		{Index: colProgress, Label: "%", Width: progressW, AlignRight: true},
 		{Index: colSize, Label: "Size", Width: sizeW, AlignRight: true},
-		{Index: colAdded, Label: "Added", Width: addedW, AlignRight: true},
 		{Index: colName, Label: "Name", Width: nameW},
+		{Index: colAdded, Label: "Added", Width: addedW, AlignRight: true},
 	}
 }
 
@@ -148,7 +148,7 @@ func torrentStatusRank(status string) int {
 	}
 }
 
-func renderTableHeader(columns []columnSpec, selectedCol, sortCol int, sortAsc bool, width int) string {
+func renderTableHeader(columns []columnSpec, sortCol int, sortAsc bool, width int) string {
 	cells := make([]string, len(columns))
 	for i, col := range columns {
 		label := col.Label
@@ -160,7 +160,7 @@ func renderTableHeader(columns []columnSpec, selectedCol, sortCol int, sortAsc b
 			}
 		}
 		padded := padVisual(label, col.Width, col.AlignRight)
-		if col.Index == selectedCol {
+		if col.Index == sortCol {
 			cells[i] = headerSelColStyle.Render(padded)
 		} else {
 			cells[i] = headerRowStyle.Render(padded)

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -25,11 +26,10 @@ func TestSortTorrentsAddedNewestFirst(t *testing.T) {
 	}
 }
 
-func TestSortSelectedColumnPreservesSelection(t *testing.T) {
+func TestSortByColumnPreservesSelection(t *testing.T) {
 	m := Model{
-		sortColumn:     colAdded,
-		selectedColumn: colSize,
-		sortAscending:  false,
+		sortColumn:    colAdded,
+		sortAscending: false,
 		torrents: []models.Torrent{
 			{ID: "a", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Bytes: 10},
 			{ID: "b", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC), Bytes: 30},
@@ -38,7 +38,7 @@ func TestSortSelectedColumnPreservesSelection(t *testing.T) {
 		selectedIdx: 1,
 	}
 
-	m.sortSelectedColumn()
+	m.sortByColumn(colSize)
 
 	if got := m.selectedTorrentID(); got != "b" {
 		t.Fatalf("selected torrent = %q, want b", got)
@@ -53,9 +53,8 @@ func TestSortSelectedColumnPreservesSelection(t *testing.T) {
 
 func TestSortTogglesDirection(t *testing.T) {
 	m := Model{
-		sortColumn:     colAdded,
-		selectedColumn: colAdded,
-		sortAscending:  false,
+		sortColumn:    colAdded,
+		sortAscending: false,
 		torrents: []models.Torrent{
 			{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
 			{ID: "new", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
@@ -63,7 +62,7 @@ func TestSortTogglesDirection(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	m.sortSelectedColumn()
+	m.sortByColumn(colAdded)
 	if !m.sortAscending {
 		t.Fatal("expected ascending after first toggle on same column")
 	}
@@ -71,7 +70,7 @@ func TestSortTogglesDirection(t *testing.T) {
 		t.Fatalf("expected old first in ascending, got %s", m.torrents[0].ID)
 	}
 
-	m.sortSelectedColumn()
+	m.sortByColumn(colAdded)
 	if m.sortAscending {
 		t.Fatal("expected descending after second toggle")
 	}
@@ -82,9 +81,8 @@ func TestSortTogglesDirection(t *testing.T) {
 
 func TestSortDifferentColumnResetsDirection(t *testing.T) {
 	m := Model{
-		sortColumn:     colAdded,
-		selectedColumn: colSize,
-		sortAscending:  true,
+		sortColumn:    colAdded,
+		sortAscending: true,
 		torrents: []models.Torrent{
 			{ID: "a", Bytes: 10},
 			{ID: "b", Bytes: 30},
@@ -92,7 +90,7 @@ func TestSortDifferentColumnResetsDirection(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	m.sortSelectedColumn()
+	m.sortByColumn(colSize)
 
 	if m.sortColumn != colSize {
 		t.Fatalf("sortColumn = %d, want colSize", m.sortColumn)
@@ -109,35 +107,6 @@ func TestDefaultSortState(t *testing.T) {
 	}
 	if m.sortAscending {
 		t.Fatal("default sortAscending should be false")
-	}
-	if m.selectedColumn != colAdded {
-		t.Fatalf("default selectedColumn = %d, want colAdded", m.selectedColumn)
-	}
-}
-
-func TestMoveColumnSelection(t *testing.T) {
-	m := Model{selectedColumn: colAdded}
-
-	m.moveColumnSelection(1)
-	if m.selectedColumn != colName {
-		t.Fatalf("after right: selectedColumn = %d, want colName(%d)", m.selectedColumn, colName)
-	}
-
-	m.moveColumnSelection(-1)
-	if m.selectedColumn != colAdded {
-		t.Fatalf("after left: selectedColumn = %d, want colAdded(%d)", m.selectedColumn, colAdded)
-	}
-
-	m.selectedColumn = 0
-	m.moveColumnSelection(-1)
-	if m.selectedColumn != columnCount-1 {
-		t.Fatalf("wrap left: selectedColumn = %d, want %d", m.selectedColumn, columnCount-1)
-	}
-
-	m.selectedColumn = columnCount - 1
-	m.moveColumnSelection(1)
-	if m.selectedColumn != 0 {
-		t.Fatalf("wrap right: selectedColumn = %d, want 0", m.selectedColumn)
 	}
 }
 
@@ -203,5 +172,162 @@ func TestCompareByColumn(t *testing.T) {
 	}
 	if cmp := compareByColumn(a, b, colName); cmp >= 0 {
 		t.Fatal("alpha < beta, expected cmp < 0")
+	}
+}
+
+func TestEnterOpensDetailView(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail after Enter", m.mode)
+	}
+	if cmd == nil {
+		t.Fatal("expected a detail fetch command when entering detail view without cached detail")
+	}
+}
+
+func TestEnterWithCachedDetail(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a"}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail after Enter", m.mode)
+	}
+	if cmd != nil {
+		t.Fatal("expected no command when detail is already cached")
+	}
+}
+
+func TestEscapeReturnsToList(t *testing.T) {
+	m := Model{
+		mode:       modeDetail,
+		returnMode: modeMain,
+		sortColumn: colAdded,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain after ESC", m.mode)
+	}
+}
+
+func TestShiftLetterSortShortcuts(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Bytes: 10, Status: "downloaded", Progress: 50, Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Filename: "a"},
+			{ID: "b", Bytes: 30, Status: "error", Progress: 75, Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC), Filename: "b"},
+		},
+		selectedIdx: 0,
+	}
+
+	tests := []struct {
+		key  string
+		want int
+	}{
+		{"S", colStatus},
+		{"P", colProgress},
+		{"Z", colSize},
+		{"D", colAdded},
+		{"N", colName},
+	}
+	for _, tt := range tests {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
+		m = updated.(Model)
+		if m.sortColumn != tt.want {
+			t.Fatalf("after %s: sortColumn = %d, want %d", tt.key, m.sortColumn, tt.want)
+		}
+	}
+}
+
+func TestDeleteFromMainView(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		returnMode:    modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a", Filename: "test"}},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if m.mode != modeDelete {
+		t.Fatalf("mode = %q, want modeDelete after x", m.mode)
+	}
+	if m.deleteID != "a" {
+		t.Fatalf("deleteID = %q, want a", m.deleteID)
+	}
+}
+
+func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
+	m := Model{
+		mode:       modeDelete,
+		returnMode: modeDetail,
+		deleteID:   "a",
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail after cancel", m.mode)
+	}
+}
+
+func TestDeleteSuccessReturnsToMain(t *testing.T) {
+	m := Model{
+		mode:       modeDelete,
+		returnMode: modeDetail,
+		deleteID:   "a",
+	}
+
+	updated, _ := m.Update(deleteMsg{err: nil})
+	m = updated.(Model)
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain after successful delete", m.mode)
+	}
+}
+
+func TestModalReturnsToReturnMode(t *testing.T) {
+	m := Model{
+		mode:       modeSelectFiles,
+		returnMode: modeDetail,
+		selector:   selectFilesState{Files: []models.TorrentFile{}, Selected: map[int]bool{}},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail after modal cancel", m.mode)
 	}
 }
