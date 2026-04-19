@@ -3,7 +3,6 @@ package tui
 import (
 	"time"
 
-	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -45,16 +44,14 @@ func renderFlash(m Model) string {
 	if m.flash.message == "" {
 		return ""
 	}
-	var style lipgloss.Style
+	var style = infoStyle
 	switch m.flash.level {
 	case flashSuccess:
 		style = okStyle
 	case flashError:
 		style = errorStyle
 	case flashWarn:
-		style = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	default:
-		style = lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Bold(true)
+		style = warnStyle
 	}
-	return style.Render(m.flash.message)
+	return style.Render("  ▸ " + m.flash.message)
 }

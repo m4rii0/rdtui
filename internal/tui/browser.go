@@ -485,7 +485,7 @@ func (b fileBrowserState) view(width, height int) string {
 	if b.VisualMode {
 		footer = headStyle.Render("[VISUAL]") + " " + footer
 	}
-	footer += footerSepStyle.Render("  │  ") + footerDescStyle.Render(fmt.Sprintf("Selected: %d", len(b.Selected)))
+	footer += footerSepStyle.Render("  ──  ") + infoStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
 
 	lines = append(lines, "", footer)
 
@@ -559,7 +559,7 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 		shortcutHint{Key: "enter", Desc: "navigate/select"},
 		shortcutHint{Key: "esc", Desc: "cancel edit"},
 	)
-	footer += footerSepStyle.Render("  │  ") + footerDescStyle.Render(fmt.Sprintf("Selected: %d", len(b.Selected)))
+	footer += footerSepStyle.Render("  ──  ") + infoStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")

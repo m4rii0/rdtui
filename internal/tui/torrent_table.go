@@ -226,6 +226,35 @@ func padVisual(content string, width int, alignRight bool) string {
 func statusLabelPlain(status string) string {
 	switch status {
 	case "downloaded":
+		return "✓ DONE"
+	case "downloading":
+		return "● DL"
+	case "queued":
+		return "◌ QD"
+	case "compressing":
+		return "◌ CMP"
+	case "uploading":
+		return "◌ UL"
+	case "waiting_files_selection":
+		return "◐ WAIT"
+	case "error":
+		return "✗ ERR"
+	case "dead":
+		return "✗ DEAD"
+	case "virus":
+		return "✗ VIRUS"
+	case "magnet_error":
+		return "✗ MAGERR"
+	default:
+		return status
+	}
+}
+
+// statusLabelForSearch returns ASCII-only labels used in torrentMatchString and
+// fieldMatchIndices so that byte indices from fuzzy.Find align with rune counts.
+func statusLabelForSearch(status string) string {
+	switch status {
+	case "downloaded":
 		return "DONE"
 	case "downloading":
 		return "DL"
@@ -252,7 +281,7 @@ func statusLabelPlain(status string) string {
 
 func torrentMatchString(t models.Torrent) string {
 	return strings.Join([]string{
-		statusLabelPlain(t.Status),
+		statusLabelForSearch(t.Status),
 		formatProgress(t.Progress),
 		humanBytes(t.Bytes),
 		t.Filename,
@@ -351,7 +380,7 @@ func fieldMatchIndices(t models.Torrent, matchIndices []int) map[int][]int {
 		col   int
 		value string
 	}{
-		{colStatus, statusLabelPlain(t.Status)},
+		{colStatus, statusLabelForSearch(t.Status)},
 		{colProgress, formatProgress(t.Progress)},
 		{colSize, humanBytes(t.Bytes)},
 		{colName, t.Filename},

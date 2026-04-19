@@ -6,33 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
-var (
-	appStyle               = lipgloss.NewStyle().Padding(1, 2)
-	headStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	mutedStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	footerKeyStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
-	footerDescStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
-	footerSepStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
-	okStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	boxStyle               = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	selectedStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
-	headerRowStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
-	headerSelColStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
-	statusDownloadedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	statusDownloadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
-	statusWaitingStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	statusErrorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	batchMarkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("237"))
-	searchStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
-	matchHighlightStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("226"))
-)
+
 
 func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
@@ -43,77 +22,80 @@ func renderView(m Model) string {
 	return appStyle.Render(renderBackground(m))
 }
 
-func renderAuthChoice(m Model) string {
-	title := headStyle.Render("rdtui")
-	if m.version != "" {
-		title += " " + mutedStyle.Render("v"+m.version)
+func username(m Model) string {
+	if m.session != nil {
+		return m.session.User.Username
 	}
+	return ""
+}
+
+func renderAuthChoice(m Model) string {
 	lines := []string{
-		title,
+		renderBanner(m.version),
 		"",
-		"Choose an authentication method:",
-		"  1. Private API token",
-		"  2. Device auth",
+		subtleStyle.Render("── Authentication ──────────────────────────────"),
 		"",
-		mutedStyle.Render("Press 1/t for token, 2/d for device auth, q to quit"),
+		textStyle.Render("  Choose an authentication method:"),
+		"",
+		"  " + footerKeyStyle.Render("1") + " " + footerDescStyle.Render("/ ") + footerKeyStyle.Render("t") + "  " + textStyle.Render("Private API token"),
+		"  " + footerKeyStyle.Render("2") + " " + footerDescStyle.Render("/ ") + footerKeyStyle.Render("d") + "  " + textStyle.Render("Device auth (browser)"),
+		"",
+		mutedStyle.Render("  q  quit"),
 	}
 	if m.errText != "" {
-		lines = append(lines, "", errorStyle.Render(m.errText))
+		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}
 	if m.status != "" {
-		lines = append(lines, "", mutedStyle.Render(m.status))
+		lines = append(lines, "", infoStyle.Render("  ▸ "+m.status))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func renderInput(m Model) string {
-	title := headStyle.Render("rdtui")
-	if m.version != "" {
-		title += " " + mutedStyle.Render("v"+m.version)
-	}
 	lines := []string{
-		title,
+		renderBanner(m.version),
 		"",
-		m.inputPrompt,
-		m.input.View(),
+		subtleStyle.Render("── Input ───────────────────────────────────────"),
 		"",
-		mutedStyle.Render("Enter to submit, Esc to cancel"),
+		headStyle.Render("  ▸ " + m.inputPrompt),
+		"  " + m.input.View(),
+		"",
+		mutedStyle.Render("  enter  submit   esc  cancel"),
 	}
 	if m.errText != "" {
-		lines = append(lines, "", errorStyle.Render(m.errText))
+		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func renderDeviceAuth(m Model) string {
-	title := headStyle.Render("rdtui")
-	if m.version != "" {
-		title += " " + mutedStyle.Render("v"+m.version)
-	}
 	lines := []string{
-		title,
+		renderBanner(m.version),
 		"",
-		"Complete device authentication:",
+		subtleStyle.Render("── Device Authentication ───────────────────────"),
+		"",
 	}
 	if m.deviceCode != nil {
 		lines = append(lines,
-			fmt.Sprintf("User code: %s", okStyle.Render(m.deviceCode.UserCode)),
-			fmt.Sprintf("Verification URL: %s", m.deviceCode.VerificationURL),
+			textStyle.Render("  Open this URL in your browser and enter the code:"),
+			"",
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("Code:"), okStyle.Render("  "+m.deviceCode.UserCode+"  ")),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("URL: "), infoStyle.Render(m.deviceCode.VerificationURL)),
 		)
 		if m.deviceCode.DirectVerificationURL != "" {
-			lines = append(lines, fmt.Sprintf("Direct URL: %s", m.deviceCode.DirectVerificationURL))
+			lines = append(lines, fmt.Sprintf("  %s  %s", mutedStyle.Render("Direct:"), infoStyle.Render(m.deviceCode.DirectVerificationURL)))
 		}
 		remaining := time.Duration(m.deviceCode.ExpiresIn)*time.Second - time.Since(m.deviceCode.RequestedAt)
 		if remaining > 0 {
-			lines = append(lines, fmt.Sprintf("Expires in: %s", remaining.Round(time.Second)))
+			lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("  Expires in: %s", remaining.Round(time.Second))))
 		}
 	}
-	lines = append(lines, "", mutedStyle.Render("Press Enter or r to poll now, Esc to cancel"))
+	lines = append(lines, "", mutedStyle.Render("  enter / r  poll now   esc  cancel"))
 	if m.errText != "" {
-		lines = append(lines, "", errorStyle.Render(m.errText))
+		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}
 	if m.loading {
-		lines = append(lines, "", mutedStyle.Render("Waiting for authorization..."))
+		lines = append(lines, "", infoStyle.Render("  ⠋ Waiting for authorization..."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -129,7 +111,7 @@ func renderMain(m Model) string {
 	if bodyHeight <= 0 {
 		bodyHeight = 24
 	}
-	reserved := 3
+	reserved := 4 // header(1) + empty(1) + dividerLine(1) + footer(1)
 	if m.status != "" {
 		reserved++
 	}
@@ -144,13 +126,7 @@ func renderMain(m Model) string {
 	}
 	tableHeight := max(4, bodyHeight-reserved)
 
-	header := headStyle.Render("rdtui")
-	if m.version != "" {
-		header += " " + mutedStyle.Render("v"+m.version)
-	}
-	if m.session != nil {
-		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
-	}
+	header := renderCompactHeader(m.version, username(m))
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
@@ -159,17 +135,17 @@ func renderMain(m Model) string {
 		lines = append(lines, bar)
 	}
 	if m.status != "" {
-		lines = append(lines, mutedStyle.Render(m.status))
+		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
 	}
 	if m.errText != "" {
-		lines = append(lines, errorStyle.Render(m.errText))
+		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
 	}
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, truncateLine(listFooter(m), innerWidth))
+	lines = append(lines, dividerLine(innerWidth), truncateLine(listFooter(m), innerWidth))
 	if m.loading {
-		lines = append(lines, mutedStyle.Render("Working..."))
+		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -181,59 +157,53 @@ func renderDetailView(m Model) string {
 	}
 	innerWidth := max(20, width-4)
 
-	header := headStyle.Render("rdtui")
-	if m.version != "" {
-		header += " " + mutedStyle.Render("v"+m.version)
-	}
-	if m.session != nil {
-		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
-	}
+	header := renderCompactHeader(m.version, username(m))
 
 	lines := []string{header, ""}
 
 	if m.detail == nil {
-		lines = append(lines, mutedStyle.Render("Loading torrent details..."))
+		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("loading torrent details..."))
 	} else {
 		info := m.detail
 		detailLines := []string{
-			"Details",
+			sectionTitle("Torrent Details"),
 			"",
-			fmt.Sprintf("  Name:     %s", info.Filename),
-			fmt.Sprintf("  Status:   %s", styledStatus(info.Status)),
-			fmt.Sprintf("  Progress: %s%%", formatProgress(info.Progress)),
-			fmt.Sprintf("  Size:     %s", humanBytes(max64(info.Bytes, info.OriginalBytes))),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("Name:    "), textStyle.Render(info.Filename)),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("Status:  "), styledStatus(info.Status)),
+			fmt.Sprintf("  %s  %s%%", mutedStyle.Render("Progress:"), infoStyle.Render(formatProgress(info.Progress))),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("Size:    "), infoStyle.Render(humanBytes(max64(info.Bytes, info.OriginalBytes)))),
 		}
 		if !info.Added.IsZero() {
-			detailLines = append(detailLines, fmt.Sprintf("  Added:    %s", info.Added.Format(time.RFC822)))
+			detailLines = append(detailLines, fmt.Sprintf("  %s  %s", mutedStyle.Render("Added:   "), mutedStyle.Render(info.Added.Format(time.RFC822))))
 		}
 		if len(info.Files) > 0 {
-			detailLines = append(detailLines, "", "  Files:")
+			detailLines = append(detailLines, "", subtleStyle.Render("  ── Files ──"))
 			for _, file := range info.Files {
-				marker := "[ ]"
+				marker := subtleStyle.Render("[ ]")
 				if file.Selected {
-					marker = "[x]"
+					marker = okStyle.Render("[✓]")
 				}
-				detailLines = append(detailLines, fmt.Sprintf("    %s %s (%s)", marker, file.Path, humanBytes(file.Bytes)))
+				detailLines = append(detailLines, fmt.Sprintf("    %s %s %s", marker, textStyle.Render(file.Path), mutedStyle.Render("("+humanBytes(file.Bytes)+")")))
 			}
 		}
 		if len(info.Links) > 0 {
-			detailLines = append(detailLines, "", fmt.Sprintf("  Generated links: %d", len(info.Links)))
+			detailLines = append(detailLines, "", fmt.Sprintf("  %s  %s", mutedStyle.Render("Links:   "), infoStyle.Render(fmt.Sprintf("%d generated", len(info.Links)))))
 		}
-		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(detailLines, "\n")))
+		lines = append(lines, panelStyle.Width(innerWidth).Render(strings.Join(detailLines, "\n")))
 	}
 
 	if m.status != "" {
-		lines = append(lines, mutedStyle.Render(m.status))
+		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
 	}
 	if m.errText != "" {
-		lines = append(lines, errorStyle.Render(m.errText))
+		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
 	}
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, truncateLine(detailFooter(), innerWidth))
+	lines = append(lines, dividerLine(innerWidth), truncateLine(detailFooter(), innerWidth))
 	if m.loading {
-		lines = append(lines, mutedStyle.Render("Working..."))
+		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -245,54 +215,50 @@ func renderDownloadView(m Model) string {
 	}
 	innerWidth := max(20, width-4)
 
-	header := headStyle.Render("rdtui")
-	if m.version != "" {
-		header += " " + mutedStyle.Render("v"+m.version)
-	}
-	if m.session != nil {
-		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
-	}
+	header := renderCompactHeader(m.version, username(m))
 
 	lines := []string{header, ""}
 	if m.download == nil {
-		lines = append(lines, mutedStyle.Render("Preparing managed download..."))
+		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("preparing download..."))
 	} else {
 		d := m.download
+		pct := d.Progress() / 100.0
+		progBar := m.progress.ViewAs(pct)
 		stats := []string{
-			"Managed Download",
+			sectionTitle("Managed Download"),
 			"",
-			fmt.Sprintf("  File:        %s", d.Filename),
-			fmt.Sprintf("  Status:      %s", managedDownloadStatusLabel(d.Status)),
-			fmt.Sprintf("  Progress:    %.1f%%", d.Progress()),
-			fmt.Sprintf("  Transferred: %s / %s", humanBytes(d.CompletedLength), humanBytes(d.TotalLength)),
-			fmt.Sprintf("  Speed:       %s/s", humanBytes(d.DownloadSpeed)),
-			fmt.Sprintf("  ETA:         %s", formatETA(d.ETA())),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("File:       "), textStyle.Render(d.Filename)),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("Status:     "), managedDownloadStatusLabel(d.Status)),
+			fmt.Sprintf("  %s  %s  %.1f%%", mutedStyle.Render("Progress:   "), progBar, d.Progress()),
+			fmt.Sprintf("  %s  %s / %s", mutedStyle.Render("Transferred:"), infoStyle.Render(humanBytes(d.CompletedLength)), mutedStyle.Render(humanBytes(d.TotalLength))),
+			fmt.Sprintf("  %s  %s/s", mutedStyle.Render("Speed:      "), infoStyle.Render(humanBytes(d.DownloadSpeed))),
+			fmt.Sprintf("  %s  %s", mutedStyle.Render("ETA:        "), textStyle.Render(formatETA(d.ETA()))),
 		}
 		if d.Connections > 0 {
-			stats = append(stats, fmt.Sprintf("  Connections: %d", d.Connections))
+			stats = append(stats, fmt.Sprintf("  %s  %d", mutedStyle.Render("Connections:"), d.Connections))
 		}
 		if d.FilePath != "" {
-			stats = append(stats, fmt.Sprintf("  Path:        %s", d.FilePath))
+			stats = append(stats, fmt.Sprintf("  %s  %s", mutedStyle.Render("Path:       "), mutedStyle.Render(d.FilePath)))
 		} else if d.Directory != "" {
-			stats = append(stats, fmt.Sprintf("  Directory:   %s", d.Directory))
+			stats = append(stats, fmt.Sprintf("  %s  %s", mutedStyle.Render("Directory:  "), mutedStyle.Render(d.Directory)))
 		}
 		if d.ErrorMessage != "" {
-			stats = append(stats, "", errorStyle.Render(d.ErrorMessage))
+			stats = append(stats, "", errorStyle.Render("  ✗ "+d.ErrorMessage))
 		}
 		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(stats, "\n")))
 	}
 	if m.status != "" {
-		lines = append(lines, mutedStyle.Render(m.status))
+		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
 	}
 	if m.errText != "" {
-		lines = append(lines, errorStyle.Render(m.errText))
+		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
 	}
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, truncateLine(downloadFooter(m.download, m.downloadTorrentID != ""), innerWidth))
+	lines = append(lines, dividerLine(innerWidth), truncateLine(downloadFooter(m.download, m.downloadTorrentID != ""), innerWidth))
 	if m.loading {
-		lines = append(lines, mutedStyle.Render("Working..."))
+		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -308,19 +274,19 @@ func renderTorrentList(m Model, width, height int) string {
 	if len(vis) == 0 {
 		if m.filterApplied || m.mode == modeSearch {
 			return strings.Join(fitLines([]string{
-				headStyle.Render(fmt.Sprintf("Torrents [%d/%d]", 0, len(m.torrents))),
+				headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[0/%d]", len(m.torrents))),
 				"",
-				mutedStyle.Render("No matches"),
+				mutedStyle.Render("  No matches"),
 			}, height), "\n")
 		}
 		return strings.Join(fitLines([]string{
-			headStyle.Render(fmt.Sprintf("Torrents [%d]", len(m.torrents))),
+			headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(m.torrents))),
 			"",
-			mutedStyle.Render("No torrents loaded"),
+			mutedStyle.Render("  No torrents loaded"),
 		}, height), "\n")
 	}
-	title := headStyle.Render(fmt.Sprintf("Torrents [%d]", len(vis)))
-	bodyHeight := max(1, height-2)
+	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(vis)))
+	bodyHeight := max(1, height-3) // +1 for divider line
 	showScrollbar := len(vis) > bodyHeight
 	colWidth := width
 	if m.batchMode {
@@ -328,6 +294,7 @@ func renderTorrentList(m Model, width, height int) string {
 	}
 	columns := tableColumns(colWidth, showScrollbar)
 	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
+	headerDiv := dividerLine(width)
 	start, end := torrentListWindow(len(vis), m.selectedIdx, bodyHeight)
 	thumbTop, thumbSize := scrollbarThumb(len(vis), bodyHeight, start)
 
@@ -350,13 +317,15 @@ func renderTorrentList(m Model, width, height int) string {
 			rowStr = selectedStyle.Width(width).Render(truncateLine(rowStr, width))
 		} else if m.batchMode && m.batchSelected[t.ID] {
 			rowStr = batchMarkedStyle.Width(width).Render(truncateLine(rowStr, width))
+		} else if row%2 == 1 {
+			rowStr = altRowStyle.Width(width).Render(truncateLine(rowStr, width))
 		} else {
 			rowStr = truncateLine(rowStr, width)
 		}
 		bodyLines = append(bodyLines, rowStr)
 	}
 
-	lines := []string{title, header}
+	lines := []string{title, header, headerDiv}
 	lines = append(lines, bodyLines...)
 	return strings.Join(fitLines(lines, height), "\n")
 }
@@ -366,8 +335,12 @@ func renderSearchBar(m Model) string {
 		return ""
 	}
 	vis := m.visibleTorrents()
-	count := fmt.Sprintf("%d/%d", len(vis), len(m.torrents))
-	return m.searchInput.View() + " " + mutedStyle.Render("["+count+"]")
+	count := infoStyle.Render(fmt.Sprintf("%d", len(vis))) + mutedStyle.Render("/"+fmt.Sprintf("%d", len(m.torrents)))
+	prefix := searchStyle.Render("▸ ") + mutedStyle.Render("search: ")
+	if m.filterApplied && m.mode != modeSearch {
+		prefix = warnStyle.Render("▸ ") + mutedStyle.Render("filter: ")
+	}
+	return prefix + m.searchInput.View() + "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
 }
 
 func listFooter(m Model) string {
@@ -387,7 +360,7 @@ func listFooter(m Model) string {
 			shortcutHint{Key: "x", Desc: "delete"},
 			shortcutHint{Key: "y", Desc: "copy"},
 			shortcutHint{Key: "b/esc", Desc: "exit"},
-		) + footerSepStyle.Render("  |  ") + footerDescStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
+		) + footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
 	}
 	return renderFooterShortcuts(
 		shortcutHint{Key: "↑↓ j/k", Desc: "move"},
@@ -447,7 +420,7 @@ func renderFooterShortcuts(items ...shortcutHint) string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, footerSepStyle.Render("  ·  "))
+	return strings.Join(parts, footerSepStyle.Render("  ▪  "))
 }
 
 func statusLabel(status string) string {

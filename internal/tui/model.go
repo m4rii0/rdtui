@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/auth"
@@ -117,6 +119,8 @@ type Model struct {
 	inputPrompt string
 	inputAction inputAction
 	searchInput textinput.Model
+	spinner     spinner.Model
+	progress    progress.Model
 
 	deviceCode        *models.DeviceCode
 	browser           fileBrowserState
@@ -229,6 +233,13 @@ func NewModel(service *app.Service) Model {
 	si.Prompt = "/"
 	si.Placeholder = "search..."
 	si.SetWidth(40)
+	sp := spinner.New(
+		spinner.WithSpinner(spinner.Meter),
+		spinner.WithStyle(infoStyle),
+	)
+	pb := progress.New(
+		progress.WithDefaultBlend(),
+	)
 	return Model{
 		service:       service,
 		version:       version.Version,
@@ -237,6 +248,8 @@ func NewModel(service *app.Service) Model {
 		downloadDir:   modelDownloadDir(service),
 		input:         ti,
 		searchInput:   si,
+		spinner:       sp,
+		progress:      pb,
 		sortColumn:    colAdded,
 		sortAscending: false,
 		batchSelected: map[string]bool{},
@@ -244,7 +257,7 @@ func NewModel(service *app.Service) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return bootstrapCmd(m.service)
+	return tea.Batch(bootstrapCmd(m.service), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -596,6 +609,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 		return model, cmd
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case progress.FrameMsg:
+		var cmd tea.Cmd
+		m.progress, cmd = m.progress.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
