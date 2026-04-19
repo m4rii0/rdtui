@@ -29,7 +29,7 @@ type Torrent struct {
 	Bytes    int64     `json:"bytes"`
 	Host     string    `json:"host"`
 	Split    int       `json:"split"`
-	Progress int       `json:"progress"`
+	Progress float64   `json:"progress"`
 	Status   string    `json:"status"`
 	Added    time.Time `json:"added"`
 	Ended    time.Time `json:"ended,omitempty"`

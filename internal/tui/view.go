@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -142,7 +143,7 @@ func renderTorrentList(m Model) string {
 		return strings.Join(lines, "\n")
 	}
 	for idx, torrent := range m.torrents {
-		line := fmt.Sprintf("%s  %3d%%  %s", statusGlyph(torrent.Status), torrent.Progress, torrent.Filename)
+		line := fmt.Sprintf("%s  %6s%%  %s", statusGlyph(torrent.Status), formatProgress(torrent.Progress), torrent.Filename)
 		if idx == m.selectedIdx {
 			line = selectedStyle.Render(line)
 		}
@@ -161,7 +162,7 @@ func renderTorrentDetail(m Model) string {
 		"",
 		fmt.Sprintf("Name: %s", info.Filename),
 		fmt.Sprintf("Status: %s", styledStatus(info.Status)),
-		fmt.Sprintf("Progress: %d%%", info.Progress),
+		fmt.Sprintf("Progress: %s%%", formatProgress(info.Progress)),
 		fmt.Sprintf("Size: %s", humanBytes(max64(info.Bytes, info.OriginalBytes))),
 	}
 	if !info.Added.IsZero() {
@@ -276,6 +277,13 @@ func humanBytes(bytes int64) string {
 		return fmt.Sprintf("%d %s", bytes, units[unit])
 	}
 	return fmt.Sprintf("%.1f %s", value, units[unit])
+}
+
+func formatProgress(progress float64) string {
+	if progress == math.Trunc(progress) {
+		return fmt.Sprintf("%.0f", progress)
+	}
+	return fmt.Sprintf("%.2f", progress)
 }
 
 func max64(values ...int64) int64 {

@@ -92,7 +92,7 @@ func (c *Client) ListTorrents(ctx context.Context, limit int) ([]models.Torrent,
 		Bytes    int64    `json:"bytes"`
 		Host     string   `json:"host"`
 		Split    int      `json:"split"`
-		Progress int      `json:"progress"`
+		Progress float64  `json:"progress"`
 		Status   string   `json:"status"`
 		Added    string   `json:"added"`
 		Ended    string   `json:"ended"`
@@ -122,20 +122,20 @@ func (c *Client) ListTorrents(ctx context.Context, limit int) ([]models.Torrent,
 
 func (c *Client) TorrentInfo(ctx context.Context, id string) (models.TorrentInfo, error) {
 	var raw struct {
-		ID               string `json:"id"`
-		Filename         string `json:"filename"`
-		OriginalFilename string `json:"original_filename"`
-		Hash             string `json:"hash"`
-		Bytes            int64  `json:"bytes"`
-		OriginalBytes    int64  `json:"original_bytes"`
-		Host             string `json:"host"`
-		Split            int    `json:"split"`
-		Progress         int    `json:"progress"`
-		Status           string `json:"status"`
-		Added            string `json:"added"`
-		Ended            string `json:"ended"`
-		Speed            int64  `json:"speed"`
-		Seeders          int    `json:"seeders"`
+		ID               string  `json:"id"`
+		Filename         string  `json:"filename"`
+		OriginalFilename string  `json:"original_filename"`
+		Hash             string  `json:"hash"`
+		Bytes            int64   `json:"bytes"`
+		OriginalBytes    int64   `json:"original_bytes"`
+		Host             string  `json:"host"`
+		Split            int     `json:"split"`
+		Progress         float64 `json:"progress"`
+		Status           string  `json:"status"`
+		Added            string  `json:"added"`
+		Ended            string  `json:"ended"`
+		Speed            int64   `json:"speed"`
+		Seeders          int     `json:"seeders"`
 		Links            []string
 		Files            []struct {
 			ID       int    `json:"id"`

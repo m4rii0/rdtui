@@ -3,6 +3,7 @@ package realdebrid
 import (
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,7 +32,7 @@ func TestClientUserSuccess(t *testing.T) {
 	}
 }
 
-func TestClientListTorrentsParsesResponse(t *testing.T) {
+func TestClientListTorrentsParsesIntegerProgressResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/torrents" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -50,6 +51,47 @@ func TestClientListTorrentsParsesResponse(t *testing.T) {
 	}
 	if torrents[0].Filename != "Example" || torrents[0].Progress != 100 {
 		t.Fatalf("unexpected torrent: %+v", torrents[0])
+	}
+}
+
+func TestClientListTorrentsParsesFloatProgressResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/torrents" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `[{"id":"abc","filename":"Example","hash":"h","bytes":123,"host":"rd","split":50,"progress":99.67,"status":"downloading","added":"2030-01-01T00:00:00Z","links":[]}]`)
+	}))
+	defer server.Close()
+
+	client := NewClient("token-123", server.URL, server.URL)
+	torrents, err := client.ListTorrents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListTorrents() error = %v", err)
+	}
+	if len(torrents) != 1 {
+		t.Fatalf("len(torrents) = %d, want 1", len(torrents))
+	}
+	if math.Abs(torrents[0].Progress-99.67) > 0.0001 {
+		t.Fatalf("progress = %v, want 99.67", torrents[0].Progress)
+	}
+}
+
+func TestClientTorrentInfoParsesFloatProgressResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/torrents/info/abc" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"id":"abc","filename":"Example","original_filename":"Example","hash":"h","bytes":123,"original_bytes":123,"host":"rd","split":50,"progress":99.97,"status":"downloading","added":"2030-01-01T00:00:00Z","files":[],"links":[]}`)
+	}))
+	defer server.Close()
+
+	client := NewClient("token-123", server.URL, server.URL)
+	info, err := client.TorrentInfo(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("TorrentInfo() error = %v", err)
+	}
+	if math.Abs(info.Progress-99.97) > 0.0001 {
+		t.Fatalf("progress = %v, want 99.97", info.Progress)
 	}
 }
 
