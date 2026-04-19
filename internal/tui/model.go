@@ -90,7 +90,7 @@ type targetPickerState struct {
 }
 
 type Model struct {
-	service *app.Service
+	service app.AppService
 
 	version     string
 	mode        mode
@@ -225,7 +225,7 @@ type devicePollTickMsg time.Time
 
 type downloadTickMsg time.Time
 
-func NewModel(service *app.Service) Model {
+func NewModel(service app.AppService) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.SetWidth(64)
@@ -1270,28 +1270,28 @@ func (s selectFilesState) selectedIDs() []int {
 	return ids
 }
 
-func bootstrapCmd(service *app.Service) tea.Cmd {
+func bootstrapCmd(service app.AppService) tea.Cmd {
 	return func() tea.Msg {
 		session, err := service.Bootstrap(context.Background())
 		return bootstrapMsg{session: session, err: err}
 	}
 }
 
-func authTokenCmd(service *app.Service, token string) tea.Cmd {
+func authTokenCmd(service app.AppService, token string) tea.Cmd {
 	return func() tea.Msg {
 		session, err := service.AuthenticateWithToken(context.Background(), token, true)
 		return authMsg{session: session, err: err}
 	}
 }
 
-func startDeviceCmd(service *app.Service) tea.Cmd {
+func startDeviceCmd(service app.AppService) tea.Cmd {
 	return func() tea.Msg {
 		code, err := service.StartDeviceFlow(context.Background())
 		return deviceStartMsg{code: code, err: err}
 	}
 }
 
-func pollDeviceCmd(service *app.Service, code models.DeviceCode) tea.Cmd {
+func pollDeviceCmd(service app.AppService, code models.DeviceCode) tea.Cmd {
 	return func() tea.Msg {
 		session, err := service.CompleteDeviceFlow(context.Background(), code)
 		return devicePollMsg{session: session, err: err}
@@ -1304,14 +1304,14 @@ func devicePollTick(delay time.Duration) tea.Cmd {
 	})
 }
 
-func refreshCmd(service *app.Service) tea.Cmd {
+func refreshCmd(service app.AppService) tea.Cmd {
 	return func() tea.Msg {
 		torrents, err := service.ListTorrents(context.Background())
 		return torrentsMsg{torrents: torrents, err: err}
 	}
 }
 
-func detailCmd(service *app.Service, id string) tea.Cmd {
+func detailCmd(service app.AppService, id string) tea.Cmd {
 	if id == "" {
 		return nil
 	}
@@ -1321,33 +1321,33 @@ func detailCmd(service *app.Service, id string) tea.Cmd {
 	}
 }
 
-func addMagnetCmd(service *app.Service, magnet string) tea.Cmd {
+func addMagnetCmd(service app.AppService, magnet string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := service.AddMagnet(context.Background(), magnet)
 		return addTorrentMsg{result: result, err: err, label: "magnet"}
 	}
 }
 
-func addURLCmd(service *app.Service, remoteURL string) tea.Cmd {
+func addURLCmd(service app.AppService, remoteURL string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := service.AddTorrentURL(context.Background(), remoteURL)
 		return addTorrentMsg{result: result, err: err, label: "remote torrent URL"}
 	}
 }
 
-func importCmd(service *app.Service, paths []string) tea.Cmd {
+func importCmd(service app.AppService, paths []string) tea.Cmd {
 	return func() tea.Msg {
 		return importMsg{results: service.ImportTorrentFiles(context.Background(), paths)}
 	}
 }
 
-func selectFilesCmd(service *app.Service, torrentID string, ids []int) tea.Cmd {
+func selectFilesCmd(service app.AppService, torrentID string, ids []int) tea.Cmd {
 	return func() tea.Msg {
 		return selectFilesMsg{err: service.SelectFiles(context.Background(), torrentID, ids)}
 	}
 }
 
-func deleteCmd(service *app.Service, torrentID string) tea.Cmd {
+func deleteCmd(service app.AppService, torrentID string) tea.Cmd {
 	return func() tea.Msg {
 		return deleteMsg{err: service.DeleteTorrent(context.Background(), torrentID)}
 	}
@@ -1364,7 +1364,7 @@ func batchTick(ctx context.Context) error {
 	}
 }
 
-func batchOpCmd(service *app.Service, op batchOp, ids []string, torrents []models.Torrent) tea.Cmd {
+func batchOpCmd(service app.AppService, op batchOp, ids []string, torrents []models.Torrent) tea.Cmd {
 	return func() tea.Msg {
 		switch op {
 		case batchOpDelete:
@@ -1376,7 +1376,7 @@ func batchOpCmd(service *app.Service, op batchOp, ids []string, torrents []model
 	}
 }
 
-func executeBatchDelete(service *app.Service, ids []string) batchResultMsg {
+func executeBatchDelete(service app.AppService, ids []string) batchResultMsg {
 	result := batchResultMsg{op: batchOpDelete, total: len(ids)}
 	for i, id := range ids {
 		if i > 0 {
@@ -1396,7 +1396,7 @@ func executeBatchDelete(service *app.Service, ids []string) batchResultMsg {
 	return result
 }
 
-func executeBatchCopy(service *app.Service, ids []string, torrents []models.Torrent) batchResultMsg {
+func executeBatchCopy(service app.AppService, ids []string, torrents []models.Torrent) batchResultMsg {
 	result := batchResultMsg{op: batchOpCopy, total: len(ids)}
 	idSet := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -1454,7 +1454,7 @@ func executeBatchCopy(service *app.Service, ids []string, torrents []models.Torr
 	return result
 }
 
-func handoffCmd(service *app.Service, target models.DownloadTarget) tea.Cmd {
+func handoffCmd(service app.AppService, target models.DownloadTarget) tea.Cmd {
 	return func() tea.Msg {
 		unrestricted, err := service.ResolveDirectURL(context.Background(), target)
 		if err != nil {
@@ -1473,7 +1473,7 @@ func handoffCmd(service *app.Service, target models.DownloadTarget) tea.Cmd {
 	}
 }
 
-func resolveDownloadCmd(service *app.Service, target models.DownloadTarget) tea.Cmd {
+func resolveDownloadCmd(service app.AppService, target models.DownloadTarget) tea.Cmd {
 	return func() tea.Msg {
 		unrestricted, err := service.ResolveDirectURL(context.Background(), target)
 		if err != nil {
@@ -1491,7 +1491,7 @@ func resolveDownloadCmd(service *app.Service, target models.DownloadTarget) tea.
 	}
 }
 
-func startManagedDownloadCmd(service *app.Service, url string, filename string) tea.Cmd {
+func startManagedDownloadCmd(service app.AppService, url string, filename string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := service.StartManagedDownload(context.Background(), url, filename)
 		return managedDownloadMsg{result: result, err: err}
@@ -1504,20 +1504,20 @@ func downloadTickCmd() tea.Cmd {
 	})
 }
 
-func downloadStatusCmd(service *app.Service) tea.Cmd {
+func downloadStatusCmd(service app.AppService) tea.Cmd {
 	return func() tea.Msg {
 		download, ok, err := service.ManagedDownloadStatus(context.Background())
 		return managedDownloadStatusMsg{download: download, ok: ok, err: err}
 	}
 }
 
-func openDownloadCmd(service *app.Service, path string) tea.Cmd {
+func openDownloadCmd(service app.AppService, path string) tea.Cmd {
 	return func() tea.Msg {
 		return downloadPathMsg{action: "open", err: service.OpenFile(path)}
 	}
 }
 
-func revealDownloadCmd(service *app.Service, path string) tea.Cmd {
+func revealDownloadCmd(service app.AppService, path string) tea.Cmd {
 	return func() tea.Msg {
 		return downloadPathMsg{action: "reveal", err: service.RevealInDirectory(path)}
 	}
@@ -1548,7 +1548,7 @@ func fallbackModeForInput(action inputAction) mode {
 	return modeMain
 }
 
-func modelDownloadDir(service *app.Service) string {
+func modelDownloadDir(service app.AppService) string {
 	if service != nil {
 		if dir := service.Config().DefaultDownloadDir; dir != "" {
 			return dir
