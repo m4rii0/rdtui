@@ -242,12 +242,19 @@ func renderDeletePopup(m Model) string {
 		)
 		body = strings.Join(lines, "\n")
 	} else {
-		name := ""
+		id := ""
 		if len(m.deleteIDs) > 0 {
-			name = m.deleteIDs[0]
+			id = m.deleteIDs[0]
 		}
-		if m.detail != nil && m.detail.ID == name {
+		name := id
+		if m.detail != nil && m.detail.ID == id {
 			name = m.detail.Filename
+		}
+		for _, t := range m.torrents {
+			if t.ID == id {
+				name = t.Filename
+				break
+			}
 		}
 		title = headStyle.Render("◆ Delete Torrent")
 		body = strings.Join([]string{
