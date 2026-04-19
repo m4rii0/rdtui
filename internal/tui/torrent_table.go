@@ -170,7 +170,7 @@ func renderTableHeader(columns []columnSpec, sortCol int, sortAsc bool, width in
 	return truncateLine(strings.Join(cells, " "), width)
 }
 
-func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices []int) string {
+func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices []int, selected bool) string {
 	var fm map[int][]int
 	if len(matchIndices) > 0 {
 		fm = fieldMatchIndices(torrent, matchIndices)
@@ -202,6 +202,9 @@ func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices [
 			}
 		case colName:
 			value = torrent.Filename
+			if selected {
+				value = selectedStyle.Render(value)
+			}
 			if fm != nil {
 				value = highlightChars(value, fm[colName], matchHighlightStyle)
 			}

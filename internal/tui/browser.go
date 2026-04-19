@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/debug"
 )
 
@@ -16,6 +17,16 @@ type browserEntry struct {
 	Path     string
 	IsDir    bool
 	FileSize int64
+}
+
+type browserReadDirMsg struct {
+	dir     string
+	entries []browserEntry
+	err     error
+}
+
+type navFrame struct {
+	Cursor int
 }
 
 type fileBrowserState struct {
@@ -27,11 +38,12 @@ type fileBrowserState struct {
 	ShowHidden   bool
 	VisualMode   bool
 	VisualAnchor int
+	navStack     []navFrame
 
-	pathInput    textinput.Model
-	EditingPath  bool
+	pathInput      textinput.Model
+	EditingPath    bool
 	editCompletions []browserEntry
-	editCursor   int
+	editCursor     int
 }
 
 func newFileBrowser(startDir string) fileBrowserState {
@@ -47,64 +59,90 @@ func newFileBrowser(startDir string) fileBrowserState {
 	pi.Prompt = ""
 	pi.Placeholder = "type path..."
 	pi.SetWidth(60)
-	state := fileBrowserState{CurrentDir: abs, Selected: map[string]struct{}{}, pathInput: pi}
-	state.reload()
-	return state
+	return fileBrowserState{CurrentDir: abs, Selected: map[string]struct{}{}, pathInput: pi}
 }
 
-func (b *fileBrowserState) reload() {
-	entries, err := os.ReadDir(b.CurrentDir)
-	if err != nil {
-		b.Err = err.Error()
-		debug.Log("reload: error reading dir %s: %s", b.CurrentDir, b.Err)
+func (b *fileBrowserState) readDirCmd() tea.Cmd {
+	dir := b.CurrentDir
+	showHidden := b.ShowHidden
+	return func() tea.Msg {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return browserReadDirMsg{dir: dir, err: err}
+		}
+		var result []browserEntry
+		parent := filepath.Dir(dir)
+		if parent != dir {
+			result = append(result, browserEntry{Name: "..", Path: parent, IsDir: true})
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !showHidden && strings.HasPrefix(name, ".") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			isDir := entry.IsDir()
+			isTorrent := strings.EqualFold(filepath.Ext(name), ".torrent")
+			if info.Mode()&os.ModeSymlink != 0 {
+				symPath := filepath.Join(dir, name)
+				resolved, err := filepath.EvalSymlinks(symPath)
+				if err == nil {
+					resolvedInfo, err := os.Stat(resolved)
+					if err == nil && resolvedInfo.IsDir() {
+						isDir = true
+					}
+				}
+			}
+			if isDir || isTorrent {
+				var size int64
+				if isTorrent {
+					size = info.Size()
+				}
+				result = append(result, browserEntry{
+					Name:     name,
+					Path:     filepath.Join(dir, name),
+					IsDir:    isDir,
+					FileSize: size,
+				})
+			}
+		}
+		sort.SliceStable(result, func(i, j int) bool {
+			if result[i].Name == ".." {
+				return true
+			}
+			if result[j].Name == ".." {
+				return false
+			}
+			if result[i].IsDir != result[j].IsDir {
+				return result[i].IsDir
+			}
+			return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		})
+		return browserReadDirMsg{dir: dir, entries: result}
+	}
+}
+
+func (b *fileBrowserState) handleReadDir(msg browserReadDirMsg) {
+	if msg.dir != b.CurrentDir {
+		return
+	}
+	if msg.err != nil {
+		b.Err = msg.err.Error()
+		debug.Log("handleReadDir: error reading dir %s: %s", b.CurrentDir, b.Err)
 		return
 	}
 	b.Err = ""
-	b.Entries = b.Entries[:0]
-	parent := filepath.Dir(b.CurrentDir)
-	if parent != b.CurrentDir {
-		b.Entries = append(b.Entries, browserEntry{Name: "..", Path: parent, IsDir: true})
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !b.ShowHidden && strings.HasPrefix(name, ".") {
-			continue
-		}
-		isTorrent := strings.EqualFold(filepath.Ext(name), ".torrent")
-		if entry.IsDir() || isTorrent {
-			var size int64
-			if isTorrent {
-				if info, err := entry.Info(); err == nil {
-					size = info.Size()
-				}
-			}
-			b.Entries = append(b.Entries, browserEntry{
-				Name:     name,
-				Path:     filepath.Join(b.CurrentDir, name),
-				IsDir:    entry.IsDir(),
-				FileSize: size,
-			})
-		}
-	}
-	sort.SliceStable(b.Entries, func(i, j int) bool {
-		if b.Entries[i].Name == ".." {
-			return true
-		}
-		if b.Entries[j].Name == ".." {
-			return false
-		}
-		if b.Entries[i].IsDir != b.Entries[j].IsDir {
-			return b.Entries[i].IsDir
-		}
-		return strings.ToLower(b.Entries[i].Name) < strings.ToLower(b.Entries[j].Name)
-	})
+	b.Entries = msg.entries
 	if b.Cursor >= len(b.Entries) {
 		b.Cursor = max(0, len(b.Entries)-1)
 	}
 	if b.Cursor < 0 {
 		b.Cursor = 0
 	}
-	debug.Log("reload: dir=%s entries=%d showHidden=%v", b.CurrentDir, len(b.Entries), b.ShowHidden)
+	debug.Log("handleReadDir: dir=%s entries=%d showHidden=%v", b.CurrentDir, len(b.Entries), b.ShowHidden)
 }
 
 func (b *fileBrowserState) move(delta int) {
@@ -123,6 +161,63 @@ func (b *fileBrowserState) move(delta int) {
 	}
 }
 
+func (b *fileBrowserState) pageUp(pageSize int) {
+	if len(b.Entries) == 0 {
+		return
+	}
+	b.Cursor -= pageSize
+	if b.Cursor < 0 {
+		b.Cursor = 0
+	}
+	if b.VisualMode {
+		b.updateVisualSelection()
+	}
+}
+
+func (b *fileBrowserState) pageDown(pageSize int) {
+	if len(b.Entries) == 0 {
+		return
+	}
+	b.Cursor += pageSize
+	if b.Cursor >= len(b.Entries) {
+		b.Cursor = len(b.Entries) - 1
+	}
+	if b.VisualMode {
+		b.updateVisualSelection()
+	}
+}
+
+func (b *fileBrowserState) jumpTop() {
+	b.Cursor = 0
+	if b.VisualMode {
+		b.updateVisualSelection()
+	}
+}
+
+func (b *fileBrowserState) jumpBottom() {
+	if len(b.Entries) == 0 {
+		return
+	}
+	b.Cursor = len(b.Entries) - 1
+	if b.VisualMode {
+		b.updateVisualSelection()
+	}
+}
+
+func (b *fileBrowserState) pushNav() {
+	b.navStack = append(b.navStack, navFrame{Cursor: b.Cursor})
+}
+
+func (b *fileBrowserState) popNav() {
+	if len(b.navStack) == 0 {
+		b.Cursor = 0
+		return
+	}
+	frame := b.navStack[len(b.navStack)-1]
+	b.navStack = b.navStack[:len(b.navStack)-1]
+	b.Cursor = frame.Cursor
+}
+
 func (b *fileBrowserState) current() *browserEntry {
 	if len(b.Entries) == 0 || b.Cursor < 0 || b.Cursor >= len(b.Entries) {
 		return nil
@@ -130,18 +225,30 @@ func (b *fileBrowserState) current() *browserEntry {
 	return &b.Entries[b.Cursor]
 }
 
-func (b *fileBrowserState) openCurrent() {
+func (b *fileBrowserState) openCurrent() tea.Cmd {
 	entry := b.current()
 	if entry == nil {
-		return
+		return nil
 	}
 	if entry.IsDir {
+		b.pushNav()
 		b.CurrentDir = entry.Path
 		b.VisualMode = false
-		b.reload()
-		return
+		return b.readDirCmd()
 	}
 	b.toggleCurrent()
+	return nil
+}
+
+func (b *fileBrowserState) goUp() tea.Cmd {
+	parent := filepath.Dir(b.CurrentDir)
+	if parent == b.CurrentDir {
+		return nil
+	}
+	b.CurrentDir = parent
+	b.VisualMode = false
+	b.popNav()
+	return b.readDirCmd()
 }
 
 func (b *fileBrowserState) toggleCurrent() {
@@ -315,64 +422,62 @@ func (b *fileBrowserState) tabComplete() {
 	b.updateCompletions()
 }
 
-func (b *fileBrowserState) confirmPath() (navigate bool, selectFile string, errMsg string) {
+func (b *fileBrowserState) confirmPath() (tea.Cmd, bool, string, string) {
 	if len(b.editCompletions) > 0 && b.editCursor >= 0 && b.editCursor < len(b.editCompletions) {
 		highlighted := b.editCompletions[b.editCursor]
 		typedVal := strings.TrimSpace(b.pathInput.Value())
 		typedAbs, _ := filepath.Abs(typedVal)
 		if typedVal == "" || typedAbs == highlighted.Path || strings.HasPrefix(highlighted.Path, typedAbs+string(os.PathSeparator)) {
 			if highlighted.IsDir {
+				b.pushNav()
 				b.CurrentDir = highlighted.Path
 				b.VisualMode = false
 				b.pathInput.SetValue(highlighted.Path + string(os.PathSeparator))
 				b.pathInput.CursorEnd()
-				b.reload()
 				b.updateCompletions()
 				b.editCursor = 0
-				return true, "", ""
+				return b.readDirCmd(), true, "", ""
 			}
 			if strings.EqualFold(filepath.Ext(highlighted.Path), ".torrent") {
 				b.Selected[highlighted.Path] = struct{}{}
 				parentDir := filepath.Dir(highlighted.Path)
 				b.CurrentDir = parentDir
 				b.stopEditing()
-				b.reload()
-				return false, highlighted.Path, ""
+				return b.readDirCmd(), false, highlighted.Path, ""
 			}
 		}
 	}
 
 	raw := strings.TrimSpace(b.pathInput.Value())
 	if raw == "" {
-		return false, "", "path cannot be empty"
+		return nil, false, "", "path cannot be empty"
 	}
 	abs, err := filepath.Abs(raw)
 	if err != nil {
-		return false, "", err.Error()
+		return nil, false, "", err.Error()
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return false, "", "path does not exist: " + abs
+		return nil, false, "", "path does not exist: " + abs
 	}
 	if info.IsDir() {
+		b.pushNav()
 		b.CurrentDir = abs
 		b.VisualMode = false
 		b.pathInput.SetValue(abs + string(os.PathSeparator))
 		b.pathInput.CursorEnd()
-		b.reload()
 		b.updateCompletions()
 		b.editCursor = 0
-		return true, "", ""
+		return b.readDirCmd(), true, "", ""
 	}
 	if strings.EqualFold(filepath.Ext(abs), ".torrent") {
 		b.Selected[abs] = struct{}{}
 		parentDir := filepath.Dir(abs)
 		b.CurrentDir = parentDir
 		b.stopEditing()
-		b.reload()
-		return false, abs, ""
+		return b.readDirCmd(), false, abs, ""
 	}
-	return false, "", "not a .torrent file or directory"
+	return nil, false, "", "not a .torrent file or directory"
 }
 
 func (b *fileBrowserState) moveEditCursor(delta int) {
@@ -476,6 +581,8 @@ func (b fileBrowserState) view(width, height int) string {
 		shortcutHint{Key: "enter", Desc: "open/toggle"},
 		shortcutHint{Key: "space", Desc: "toggle"},
 		shortcutHint{Key: "V", Desc: "visual"},
+		shortcutHint{Key: "g/G", Desc: "top/bottom"},
+		shortcutHint{Key: "pgup/pgdn", Desc: "page"},
 		shortcutHint{Key: "ctrl+a", Desc: "all"},
 		shortcutHint{Key: "ctrl+d", Desc: "clear"},
 		shortcutHint{Key: "H", Desc: "hidden"},
@@ -485,7 +592,7 @@ func (b fileBrowserState) view(width, height int) string {
 	if b.VisualMode {
 		footer = headStyle.Render("[VISUAL]") + " " + footer
 	}
-	footer += footerSepStyle.Render("  ──  ") + infoStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
+	footer += footerSepStyle.Render("  ──  ") + selectedCountStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
 
 	lines = append(lines, "", footer)
 
@@ -497,6 +604,12 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 	if listH < 1 {
 		listH = 1
 	}
+
+	inputW := width - 4
+	if inputW < 10 {
+		inputW = 10
+	}
+	b.pathInput.SetWidth(inputW)
 
 	var lines []string
 	lines = append(lines, b.pathInput.View())
@@ -559,7 +672,7 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 		shortcutHint{Key: "enter", Desc: "navigate/select"},
 		shortcutHint{Key: "esc", Desc: "cancel edit"},
 	)
-	footer += footerSepStyle.Render("  ──  ") + infoStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
+	footer += footerSepStyle.Render("  ──  ") + selectedCountStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")

@@ -309,12 +309,12 @@ func renderTorrentList(m Model, width, height int) string {
 				mark = "  "
 			}
 		}
-		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID])
+		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID], idx == m.selectedIdx)
 		if showScrollbar {
 			rowStr = truncateLine(rowStr, max(1, width-2)) + " " + mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize))
 		}
 		if idx == m.selectedIdx {
-			rowStr = selectedStyle.Width(width).Render(truncateLine(rowStr, width))
+			rowStr = truncateLine(rowStr, width)
 		} else if m.batchMode && m.batchSelected[t.ID] {
 			rowStr = batchMarkedStyle.Width(width).Render(truncateLine(rowStr, width))
 		} else if row%2 == 1 {

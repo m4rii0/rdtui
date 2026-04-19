@@ -601,6 +601,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case browserReadDirMsg:
+		m.browser.handleReadDir(msg)
+		return m, nil
+
 	case tea.KeyPressMsg:
 		prevMode := m.mode
 		model, cmd := m.handleKey(msg)
@@ -772,8 +776,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.browser = newFileBrowser(".")
 			m.mode = modeFileBrowser
 			m.errText = ""
-			debug.Log("handler: entering file browser, dir=%s entries=%d", m.browser.CurrentDir, len(m.browser.Entries))
-			return m, nil
+			debug.Log("handler: entering file browser, dir=%s", m.browser.CurrentDir)
+			return m, m.browser.readDirCmd()
 		case "s":
 			if m.detail == nil || m.detail.Status != "waiting_files_selection" {
 				m.errText = "Selected torrent is not waiting for file selection"
@@ -924,16 +928,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			switch key {
 			case "esc":
 				m.browser.stopEditing()
-				m.browser.reload()
-				return m, nil
+				return m, m.browser.readDirCmd()
 			case "enter":
-				_, _, errMsg := m.browser.confirmPath()
+				cmd, _, _, errMsg := m.browser.confirmPath()
 				if errMsg != "" {
 					m.errText = errMsg
 				} else {
 					m.errText = ""
 				}
-				return m, nil
+				return m, cmd
 			case "tab":
 				m.browser.tabComplete()
 				return m, nil
@@ -950,6 +953,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		var browserCmd tea.Cmd
 		switch key {
 		case "esc":
 			m.mode = modeMain
@@ -959,7 +963,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.browser.move(1)
 		case "enter", "right", "l":
-			m.browser.openCurrent()
+			browserCmd = m.browser.openCurrent()
 		case "space":
 			m.browser.toggleCurrent()
 		case "/":
@@ -972,11 +976,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.browser.clearSelection()
 		case "H":
 			m.browser.ShowHidden = !m.browser.ShowHidden
-			m.browser.reload()
+			browserCmd = m.browser.readDirCmd()
 		case "backspace", "left", "h":
-			m.browser.CurrentDir = filepathDir(m.browser.CurrentDir)
-			m.browser.VisualMode = false
-			m.browser.reload()
+			browserCmd = m.browser.goUp()
+		case "pgup", "K":
+			m.browser.pageUp(m.height / 2)
+		case "pgdown", "J":
+			m.browser.pageDown(m.height / 2)
+		case "g":
+			m.browser.jumpTop()
+		case "G":
+			m.browser.jumpBottom()
 		case "ctrl+s":
 			selected := m.browser.selectedPaths()
 			valid, invalid := app.ValidTorrentFiles(selected)
@@ -991,7 +1001,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, importCmd(m.service, valid)
 		}
-		return m, nil
+		return m, browserCmd
 
 	case modeSelectFiles:
 		switch msg.String() {
@@ -1573,13 +1583,6 @@ func userHomeDir() string {
 		return "."
 	}
 	return home
-}
-
-func filepathDir(path string) string {
-	if path == "" {
-		return "."
-	}
-	return filepath.Dir(path)
 }
 
 func filepathBase(path string) string {
