@@ -299,21 +299,19 @@ func (b *fileBrowserState) tabComplete() {
 		dirPart = "."
 	}
 
-	names := make([]string, len(b.editCompletions))
-	for i, e := range b.editCompletions {
-		suffix := e.Name
-		if e.IsDir {
-			suffix += string(os.PathSeparator)
-		}
-		names[i] = suffix
+	highlighted := b.editCompletions[b.editCursor]
+	suffix := highlighted.Name
+	if highlighted.IsDir {
+		suffix += string(os.PathSeparator)
 	}
-	common := longestCommonPrefix(names)
-	if common == "" {
-		return
-	}
-	newVal := dirPart + string(os.PathSeparator) + common
+	newVal := dirPart + string(os.PathSeparator) + suffix
 	b.pathInput.SetValue(newVal)
 	b.pathInput.CursorEnd()
+
+	b.editCursor++
+	if b.editCursor >= len(b.editCompletions) {
+		b.editCursor = 0
+	}
 	b.updateCompletions()
 }
 
@@ -335,6 +333,8 @@ func (b *fileBrowserState) confirmPath() (navigate bool, selectFile string, errM
 			}
 			if strings.EqualFold(filepath.Ext(highlighted.Path), ".torrent") {
 				b.Selected[highlighted.Path] = struct{}{}
+				parentDir := filepath.Dir(highlighted.Path)
+				b.CurrentDir = parentDir
 				b.stopEditing()
 				b.reload()
 				return false, highlighted.Path, ""
@@ -366,6 +366,8 @@ func (b *fileBrowserState) confirmPath() (navigate bool, selectFile string, errM
 	}
 	if strings.EqualFold(filepath.Ext(abs), ".torrent") {
 		b.Selected[abs] = struct{}{}
+		parentDir := filepath.Dir(abs)
+		b.CurrentDir = parentDir
 		b.stopEditing()
 		b.reload()
 		return false, abs, ""
@@ -394,21 +396,7 @@ func splitPathInput(raw string) (dir, prefix string) {
 	return raw[:idx], raw[idx+1:]
 }
 
-func longestCommonPrefix(strs []string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	prefix := strs[0]
-	for _, s := range strs[1:] {
-		for !strings.HasPrefix(strings.ToLower(s), strings.ToLower(prefix)) {
-			prefix = prefix[:len(prefix)-1]
-			if prefix == "" {
-				return ""
-			}
-		}
-	}
-	return prefix
-}
+
 
 func (b fileBrowserState) view(width, height int) string {
 	debug.Log("browser.view: width=%d height=%d entries=%d cursor=%d selected=%d err=%q editing=%v",
@@ -468,7 +456,7 @@ func (b fileBrowserState) view(width, height int) string {
 	}
 
 	footer := renderFooterShortcuts(
-		shortcutHint{Key: "e", Desc: "edit path"},
+		shortcutHint{Key: "/", Desc: "edit path"},
 		shortcutHint{Key: "enter", Desc: "open/toggle"},
 		shortcutHint{Key: "space", Desc: "toggle"},
 		shortcutHint{Key: "V", Desc: "visual"},

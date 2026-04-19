@@ -102,7 +102,8 @@ func popupSize(termW, termH int) (int, int) {
 func isPopupMode(m mode) bool {
 	switch m {
 	case modeSelectFiles, modeDelete, modeChooseTarget,
-		modeOverwrite, modeShowURL, modeFileBrowser:
+		modeOverwrite, modeShowURL, modeFileBrowser,
+		modeMagnetInput, modeURLInput:
 		return true
 	}
 	return false
@@ -122,6 +123,10 @@ func renderPopupContent(m Model) string {
 		return renderShowURLPopup(m)
 	case modeFileBrowser:
 		return renderFileBrowserContent(m)
+	case modeMagnetInput:
+		return renderInputPopup(m, "Paste a magnet link")
+	case modeURLInput:
+		return renderInputPopup(m, "Paste a .torrent URL")
 	}
 	return ""
 }
@@ -132,7 +137,7 @@ func renderBackground(m Model) string {
 		return "Starting..."
 	case m.mode == modeAuthChoice:
 		return renderAuthChoice(m)
-	case m.mode == modeTokenInput, m.mode == modeMagnetInput, m.mode == modeURLInput:
+	case m.mode == modeTokenInput:
 		return renderInput(m)
 	case m.mode == modeDeviceAuth:
 		return renderDeviceAuth(m)
@@ -140,7 +145,8 @@ func renderBackground(m Model) string {
 		return renderDetailView(m)
 	case m.mode == modeDownload:
 		return renderDownloadView(m)
-	case m.mode == modeMain, m.mode == modeSearch:
+	case m.mode == modeMain, m.mode == modeSearch,
+		m.mode == modeMagnetInput, m.mode == modeURLInput:
 		return renderMain(m)
 	default:
 		if m.returnMode == modeDetail {
@@ -337,6 +343,25 @@ func renderShowURLPopup(m Model) string {
 			shortcutHint{Key: "enter/esc", Desc: "close"},
 		),
 	}, "\n")
+	return popupBox(title, content, innerW, false)
+}
+
+func renderInputPopup(m Model, prompt string) string {
+	popupW, _ := popupSize(m.width, m.height)
+	innerW := popupW - 4
+
+	title := headStyle.Render(" " + m.inputPrompt + " ")
+	content := strings.Join([]string{
+		m.input.View(),
+		"",
+		popupFooter(
+			shortcutHint{Key: "enter", Desc: "submit"},
+			shortcutHint{Key: "esc", Desc: "cancel"},
+		),
+	}, "\n")
+	if m.errText != "" {
+		content += "\n" + errorStyle.Render(m.errText)
+	}
 	return popupBox(title, content, innerW, false)
 }
 

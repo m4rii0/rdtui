@@ -939,7 +939,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.browser.openCurrent()
 		case " ":
 			m.browser.toggleCurrent()
-		case "e":
+		case "/":
 			m.browser.startEditing()
 		case "V":
 			m.browser.toggleVisual()
