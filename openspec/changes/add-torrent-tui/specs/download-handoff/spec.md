@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: User can generate a direct download URL from a ready torrent
-The application SHALL allow a user to choose a downloadable target from a ready torrent and SHALL convert the selected Real-Debrid torrent link into a direct download URL before any local handoff action occurs.
+The application SHALL allow a user to choose a downloadable target from a ready torrent and SHALL convert the selected Real-Debrid torrent link into a direct download URL before any local handoff action occurs. This action SHALL be available from both the list view and the detail view.
 
 #### Scenario: Ready torrent produces a direct URL
 - **WHEN** the user chooses a downloadable target from a torrent whose status is `downloaded`

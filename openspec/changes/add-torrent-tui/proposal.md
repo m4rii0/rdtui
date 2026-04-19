@@ -4,18 +4,20 @@ Real-Debrid exposes the torrent workflow needed for a useful terminal client, bu
 
 ## What Changes
 
-- Add a Go terminal UI for Real-Debrid torrents with a master-detail workflow for browsing torrents and inspecting the selected torrent.
+- Add a Go terminal UI for Real-Debrid torrents with a k9s-inspired stack navigation workflow: a full-width torrent table as the main view, pressing Enter opens a full-screen detail view for the selected torrent, and pressing ESC returns to the list.
 - Support authenticating with either Real-Debrid device auth or a pasted private API token.
 - Allow users to add new torrents from magnet links, one or more local `.torrent` files selected from a filesystem browser, and remote `.torrent` URLs.
 - Allow users to select files for torrents that are waiting for file selection, with the largest file preselected by default and confirmation before submission.
 - Allow users to generate a direct download URL from a ready torrent, then either copy/show that URL or launch a configured external downloader.
-- Allow users to delete a torrent from Real-Debrid with confirmation.
+- Allow users to delete a torrent from Real-Debrid with confirmation (via `x` key in both list and detail views).
+- Provide direct keyboard sorting for all table columns using Shift+letter shortcuts: `S` Status, `P` Progress, `Z` Size, `D` Date, `N` Name.
+- Display a context-sensitive footer with keyboard shortcut hints at all times.
 
 ## Capabilities
 
 ### New Capabilities
 - `real-debrid-authentication`: Sign in with either device auth or a private API token and reuse valid stored credentials across sessions.
-- `torrent-management`: List, inspect, add, select files for, and delete Real-Debrid torrents from the terminal UI.
+- `torrent-management`: List, inspect, add, select files for, and delete Real-Debrid torrents from the terminal UI with k9s-style stack navigation.
 - `download-handoff`: Convert ready torrent links into direct URLs and hand them off to the user or an external downloader without tracking the local transfer.
 
 ### Modified Capabilities

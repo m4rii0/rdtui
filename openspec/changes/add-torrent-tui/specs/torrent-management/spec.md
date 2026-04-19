@@ -1,15 +1,41 @@
 ## ADDED Requirements
 
-### Requirement: User can browse current Real-Debrid torrents
-The application SHALL display the user's current Real-Debrid torrents in a terminal UI and SHALL show the selected torrent's details, including status, progress, and files when available.
+### Requirement: User can browse current Real-Debrid torrents in a full-width table
+The application SHALL display the user's current Real-Debrid torrents in a full-width terminal table as the main view. Each row SHALL show the torrent's status, progress, size, date added, and name. The table SHALL display a sort direction indicator (↑/↓) on the currently sorted column header.
 
 #### Scenario: Torrent list loads successfully
 - **WHEN** the authenticated application fetches the user's torrents successfully
-- **THEN** the UI shows a torrent list and a detail view for the selected torrent
+- **THEN** the UI shows a full-width torrent table with sortable columns
+
+#### Scenario: Torrent list is empty
+- **WHEN** the authenticated application fetches the user's torrents and the list is empty
+- **THEN** the UI shows an empty-state message instead of the table
+
+### Requirement: User can drill into a full-screen torrent detail view
+The application SHALL allow the user to press Enter on a selected torrent row to open a full-screen detail view showing the torrent's name, status, progress, size, added date, files (with selection markers), and generated link count. Pressing ESC SHALL return the user to the torrent list.
+
+#### Scenario: User opens torrent detail from list
+- **WHEN** the user presses Enter on a selected torrent in the list view
+- **THEN** the application fetches that torrent's detailed info and displays it in a full-screen detail view
+
+#### Scenario: User returns to list from detail
+- **WHEN** the user presses ESC while in the detail view
+- **THEN** the application returns to the full-width torrent list view
 
 #### Scenario: Torrent detail is unavailable temporarily
 - **WHEN** loading the selected torrent detail fails but the list remains available
-- **THEN** the application keeps the torrent list visible and shows an inline detail error instead of exiting
+- **THEN** the application keeps the torrent list visible and shows an inline error instead of exiting
+
+### Requirement: User can sort torrents by any column with a single keypress
+The application SHALL provide direct keyboard sorting shortcuts for each table column: `S` for Status, `P` for Progress, `Z` for Size, `D` for Date, and `N` for Name. Pressing the same shortcut again SHALL toggle the sort direction. The current sort column and direction SHALL be indicated in the table header.
+
+#### Scenario: User sorts by a new column
+- **WHEN** the user presses a sort shortcut (S, P, Z, D, or N) and the table is not currently sorted by that column
+- **THEN** the application sorts the torrent list by that column in descending order
+
+#### Scenario: User toggles sort direction
+- **WHEN** the user presses a sort shortcut for the column that is already the active sort column
+- **THEN** the application toggles the sort direction between ascending and descending
 
 ### Requirement: User can add torrents from supported inputs
 The application SHALL allow users to add new Real-Debrid torrents from magnet links, one or more local `.torrent` files selected through a filesystem browser, and remote `.torrent` URLs.
@@ -50,7 +76,7 @@ The application SHALL detect torrents in `waiting_files_selection`, SHALL presel
 - **THEN** the application leaves the Real-Debrid torrent unchanged
 
 ### Requirement: Torrent actions respect torrent status
-The application SHALL enable or disable torrent actions based on the selected torrent's Real-Debrid status so that only valid operations are offered to the user.
+The application SHALL enable or disable torrent actions based on the selected torrent's Real-Debrid status so that only valid operations are offered to the user. Torrent actions SHALL be available from both the list view and the detail view.
 
 #### Scenario: Ready-only actions stay disabled for unfinished torrents
 - **WHEN** the selected torrent is `queued`, `downloading`, `compressing`, or `uploading`
@@ -60,8 +86,8 @@ The application SHALL enable or disable torrent actions based on the selected to
 - **WHEN** the selected torrent is `waiting_files_selection`
 - **THEN** the application offers file-selection actions instead of a direct-download handoff action
 
-### Requirement: User can delete a torrent with confirmation
-The application SHALL allow a user to delete a Real-Debrid torrent only after explicit confirmation.
+### Requirement: User can delete a torrent with confirmation using the x key
+The application SHALL allow a user to delete a Real-Debrid torrent by pressing `x`, always requiring explicit confirmation before deletion. The `x` key SHALL work from both the list view and the detail view.
 
 #### Scenario: Confirmed torrent deletion succeeds
 - **WHEN** the user confirms deletion for a torrent
@@ -70,3 +96,14 @@ The application SHALL allow a user to delete a Real-Debrid torrent only after ex
 #### Scenario: User cancels deletion
 - **WHEN** the user dismisses the deletion confirmation
 - **THEN** the application leaves the torrent in place and returns to the previous view
+
+### Requirement: Context-sensitive footer is always visible
+The application SHALL display a footer with keyboard shortcut hints at the bottom of the screen at all times. The footer content SHALL change based on the current view (list, detail, or modal) to show only the relevant shortcuts.
+
+#### Scenario: Footer shows list view shortcuts
+- **WHEN** the user is in the torrent list view
+- **THEN** the footer shows shortcuts for navigation, sorting, refresh, add-torrent, copy, delete, and quit
+
+#### Scenario: Footer shows detail view shortcuts
+- **WHEN** the user is in the torrent detail view
+- **THEN** the footer shows shortcuts for going back, select files, copy URL, delete, and refresh
