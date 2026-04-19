@@ -21,9 +21,10 @@ var (
 	selectedStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
 	headerRowStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
 	headerSelColStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Bold(true)
-	statusDownloadedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	statusWaitingStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	statusErrorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	statusDownloadedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	statusDownloadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))
+	statusWaitingStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	statusErrorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 )
 
 func renderView(m Model) string {
@@ -342,16 +343,30 @@ func detailFooter() string {
 	return mutedStyle.Render("esc=back  s=select  y=copy  x=delete  r=refresh")
 }
 
-func statusGlyph(status string) string {
+func statusLabel(status string) string {
 	switch status {
 	case "downloaded":
-		return okStyle.Render("●")
+		return statusDownloadedStyle.Render("DONE")
+	case "downloading":
+		return statusDownloadingStyle.Render("DL")
+	case "queued":
+		return statusWaitingStyle.Render("QD")
+	case "compressing":
+		return statusWaitingStyle.Render("CMP")
+	case "uploading":
+		return statusWaitingStyle.Render("UL")
 	case "waiting_files_selection":
-		return statusWaitingStyle.Render("●")
-	case "error", "dead", "virus", "magnet_error":
-		return statusErrorStyle.Render("●")
+		return statusWaitingStyle.Render("WAIT")
+	case "error":
+		return statusErrorStyle.Render("ERR")
+	case "dead":
+		return statusErrorStyle.Render("DEAD")
+	case "virus":
+		return statusErrorStyle.Render("VIRUS")
+	case "magnet_error":
+		return statusErrorStyle.Render("MAGERR")
 	default:
-		return mutedStyle.Render("●")
+		return mutedStyle.Render(status)
 	}
 }
 
@@ -359,6 +374,8 @@ func styledStatus(status string) string {
 	switch status {
 	case "downloaded":
 		return statusDownloadedStyle.Render(status)
+	case "downloading":
+		return statusDownloadingStyle.Render(status)
 	case "waiting_files_selection":
 		return statusWaitingStyle.Render(status)
 	case "error", "dead", "virus", "magnet_error":
@@ -480,17 +497,6 @@ func truncateLine(line string, width int) string {
 		return ""
 	}
 	return ansi.Truncate(line, width, "…")
-}
-
-func compactTorrentStatus(status string) string {
-	switch status {
-	case "waiting_files_selection":
-		return "waiting"
-	case "magnet_error":
-		return "magneterr"
-	default:
-		return status
-	}
 }
 
 func max64(values ...int64) int64 {

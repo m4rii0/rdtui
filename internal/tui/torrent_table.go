@@ -175,7 +175,7 @@ func renderTableRow(torrent models.Torrent, columns []columnSpec) string {
 		var value string
 		switch col.Index {
 		case colStatus:
-			value = compactTorrentStatus(torrent.Status)
+			value = statusLabel(torrent.Status)
 		case colProgress:
 			value = formatProgress(torrent.Progress)
 		case colSize:
