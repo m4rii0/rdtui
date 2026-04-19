@@ -24,6 +24,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to initialize app: %v\n", err)
 		os.Exit(1)
 	}
+	defer func() {
+		_ = service.Close()
+	}()
 
 	program := tea.NewProgram(tui.NewModel(service), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {

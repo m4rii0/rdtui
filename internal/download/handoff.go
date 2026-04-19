@@ -1,58 +1,13 @@
 package download
 
 import (
-	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/m4rii0/rdtui/pkg/models"
 )
-
-var ErrNoCommandConfigured = errors.New("no external downloader configured")
-
-type TemplateData struct {
-	URL      string
-	Dir      string
-	Filename string
-}
-
-func RenderCommand(template []string, data TemplateData) ([]string, error) {
-	if len(template) == 0 {
-		return nil, ErrNoCommandConfigured
-	}
-	out := make([]string, 0, len(template))
-	replacer := strings.NewReplacer(
-		"{{url}}", data.URL,
-		"{{dir}}", data.Dir,
-		"{{filename}}", data.Filename,
-	)
-	for _, part := range template {
-		rendered := replacer.Replace(part)
-		if strings.TrimSpace(rendered) == "" {
-			continue
-		}
-		out = append(out, rendered)
-	}
-	if len(out) == 0 {
-		return nil, ErrNoCommandConfigured
-	}
-	return out, nil
-}
-
-func Launch(template []string, data TemplateData) (models.HandoffResult, error) {
-	cmdArgs, err := RenderCommand(template, data)
-	if err != nil {
-		return models.HandoffResult{}, err
-	}
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	if err := cmd.Start(); err != nil {
-		return models.HandoffResult{}, fmt.Errorf("launch downloader: %w", err)
-	}
-	return models.HandoffResult{URL: data.URL, Launched: true, Command: cmdArgs}, nil
-}
 
 func CopyURL(value string) (bool, error) {
 	commands := [][]string{}
@@ -87,4 +42,48 @@ func FilenameForURL(path string, fallback string) string {
 		return "download"
 	}
 	return base
+}
+
+func OpenFile(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	cmd, err := openCommand(path, false)
+	if err != nil {
+		return err
+	}
+	return cmd.Run()
+}
+
+func RevealInDirectory(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("reveal file: %w", err)
+	}
+	cmd, err := openCommand(path, true)
+	if err != nil {
+		return err
+	}
+	return cmd.Run()
+}
+
+func openCommand(path string, reveal bool) (*exec.Cmd, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		if reveal {
+			return exec.Command("open", "-R", path), nil
+		}
+		return exec.Command("open", path), nil
+	case "linux":
+		if reveal {
+			return exec.Command("xdg-open", filepath.Dir(path)), nil
+		}
+		return exec.Command("xdg-open", path), nil
+	case "windows":
+		if reveal {
+			return exec.Command("explorer", "/select,", path), nil
+		}
+		return exec.Command("cmd", "/c", "start", "", path), nil
+	default:
+		return nil, fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
 }

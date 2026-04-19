@@ -85,6 +85,71 @@ type DownloadTarget struct {
 	FilePath string
 }
 
+type ManagedDownloadStatus string
+
+const (
+	ManagedDownloadStatusActive   ManagedDownloadStatus = "active"
+	ManagedDownloadStatusWaiting  ManagedDownloadStatus = "waiting"
+	ManagedDownloadStatusPaused   ManagedDownloadStatus = "paused"
+	ManagedDownloadStatusComplete ManagedDownloadStatus = "complete"
+	ManagedDownloadStatusError    ManagedDownloadStatus = "error"
+	ManagedDownloadStatusRemoved  ManagedDownloadStatus = "removed"
+)
+
+type ManagedDownload struct {
+	GID             string
+	URL             string
+	Filename        string
+	Status          ManagedDownloadStatus
+	TotalLength     int64
+	CompletedLength int64
+	DownloadSpeed   int64
+	Connections     int
+	ErrorMessage    string
+	Directory       string
+	FilePath        string
+}
+
+func (d ManagedDownload) Progress() float64 {
+	if d.TotalLength == 0 {
+		return 0
+	}
+	return float64(d.CompletedLength) / float64(d.TotalLength) * 100
+}
+
+func (d ManagedDownload) ETA() time.Duration {
+	if d.DownloadSpeed <= 0 || d.TotalLength <= 0 {
+		return -1
+	}
+	remaining := d.TotalLength - d.CompletedLength
+	if remaining <= 0 {
+		return 0
+	}
+	return time.Duration(remaining/d.DownloadSpeed) * time.Second
+}
+
+func (d ManagedDownload) IsComplete() bool {
+	return d.Status == ManagedDownloadStatusComplete
+}
+
+func (d ManagedDownload) IsError() bool {
+	return d.Status == ManagedDownloadStatusError
+}
+
+func (d ManagedDownload) IsTerminal() bool {
+	switch d.Status {
+	case ManagedDownloadStatusComplete, ManagedDownloadStatusError, ManagedDownloadStatusRemoved:
+		return true
+	default:
+		return false
+	}
+}
+
+type ManagedDownloadStart struct {
+	Download ManagedDownload
+	Reused   bool
+}
+
 type HandoffResult struct {
 	URL      string
 	Copied   bool

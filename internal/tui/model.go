@@ -14,13 +14,13 @@ import (
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/debug"
-	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/internal/version"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 const refreshInterval = 5 * time.Second
+const downloadRefreshInterval = time.Second
 
 type mode string
 
@@ -37,6 +37,7 @@ const (
 	modeSelectFiles  mode = "select-files"
 	modeChooseTarget mode = "choose-target"
 	modeShowURL      mode = "show-url"
+	modeDownload     mode = "download"
 	modeSearch       mode = "search"
 	modeDelete       mode = "delete"
 )
@@ -52,8 +53,8 @@ const (
 type handoffAction string
 
 const (
-	handoffCopy   handoffAction = "copy"
-	handoffLaunch handoffAction = "launch"
+	handoffCopy     handoffAction = "copy"
+	handoffDownload handoffAction = "download"
 )
 
 type batchOp string
@@ -98,14 +99,14 @@ type Model struct {
 	errText    string
 	session    *models.AuthSession
 
-	torrents        []models.Torrent
+	torrents         []models.Torrent
 	filteredTorrents []models.Torrent
-	selectedIdx     int
-	detail          *models.TorrentInfo
-	sortColumn      int
-	sortAscending   bool
-	filterApplied   bool
-	filterMatches   map[string][]int
+	selectedIdx      int
+	detail           *models.TorrentInfo
+	sortColumn       int
+	sortAscending    bool
+	filterApplied    bool
+	filterMatches    map[string][]int
 
 	batchMode     bool
 	batchSelected map[string]bool
@@ -120,6 +121,7 @@ type Model struct {
 	selector   selectFilesState
 	targets    targetPickerState
 	showURL    string
+	download   *models.ManagedDownload
 	deleteIDs  []string
 }
 
@@ -177,9 +179,27 @@ type handoffMsg struct {
 	err    error
 }
 
+type managedDownloadMsg struct {
+	result models.ManagedDownloadStart
+	err    error
+}
+
+type managedDownloadStatusMsg struct {
+	download models.ManagedDownload
+	ok       bool
+	err      error
+}
+
+type downloadPathMsg struct {
+	action string
+	err    error
+}
+
 type tickMsg time.Time
 
 type devicePollTickMsg time.Time
+
+type downloadTickMsg time.Time
 
 func NewModel(service *app.Service) Model {
 	ti := textinput.New()
@@ -294,6 +314,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, pollDeviceCmd(m.service, *m.deviceCode)
 		}
 		return m, nil
+
+	case downloadTickMsg:
+		if m.mode != modeDownload || m.download == nil || m.download.IsTerminal() {
+			return m, nil
+		}
+		return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
 
 	case torrentsMsg:
 		m.loading = false
@@ -443,14 +469,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showURL = msg.result.URL
 		m.mode = modeShowURL
-		if msg.result.Launched {
-			m.status = "Downloader launched: " + strings.Join(msg.result.Command, " ")
-		} else if msg.result.Copied {
+		if msg.result.Copied {
 			m.status = "Direct URL copied to clipboard"
 		} else {
 			m.status = "Direct URL ready"
 		}
 		m.errText = ""
+		return m, nil
+
+	case managedDownloadMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		download := msg.result.Download
+		m.download = &download
+		m.mode = modeDownload
+		m.errText = ""
+		if msg.result.Reused {
+			m.status = "Reopened active download: " + download.Filename
+		} else {
+			m.status = "Started download: " + download.Filename
+		}
+		if download.IsTerminal() {
+			return m, nil
+		}
+		return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
+
+	case managedDownloadStatusMsg:
+		m.loading = false
+		if !msg.ok {
+			return m, nil
+		}
+		download := msg.download
+		m.download = &download
+		if msg.err != nil {
+			m.status = "Managed download failed"
+			m.errText = ""
+			return m, nil
+		}
+		if download.IsComplete() {
+			m.status = "Download complete"
+			m.errText = ""
+			return m, nil
+		}
+		if download.IsError() {
+			m.status = "Managed download failed"
+			m.errText = ""
+			return m, nil
+		}
+		return m, nil
+
+	case downloadPathMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		m.errText = ""
+		if msg.action == "open" {
+			m.status = "Opened downloaded file"
+		} else {
+			m.status = "Opened download directory"
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -628,6 +710,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.returnMode = modeMain
 			return m.beginHandoff(handoffCopy)
+		case "d":
+			if m.batchMode {
+				return m, nil
+			}
+			m.returnMode = modeMain
+			return m.beginHandoff(handoffDownload)
 		case "b":
 			m.batchMode = !m.batchMode
 			if !m.batchMode {
@@ -728,6 +816,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y":
 			m.returnMode = modeDetail
 			return m.beginHandoff(handoffCopy)
+		case "d":
+			m.returnMode = modeDetail
+			return m.beginHandoff(handoffDownload)
 		case "x":
 			if m.detail == nil {
 				return m, nil
@@ -831,7 +922,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.loading = true
-			return m, handoffCmd(m.service, m.targets.Items[m.targets.Cursor], m.targets.Action)
+			return m, targetActionCmd(m.service, m.targets.Items[m.targets.Cursor], m.targets.Action)
 		}
 		return m, nil
 
@@ -840,6 +931,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "enter":
 			m.mode = m.returnMode
 			return m, nil
+		}
+
+	case modeDownload:
+		switch msg.String() {
+		case "esc":
+			m.mode = m.returnMode
+			if m.download != nil && !m.download.IsTerminal() {
+				m.status = "Download continues in background"
+			}
+			return m, nil
+		case "r":
+			m.loading = true
+			return m, downloadStatusCmd(m.service)
+		case "o":
+			if m.download == nil || !m.download.IsComplete() || m.download.FilePath == "" {
+				return m, nil
+			}
+			m.loading = true
+			return m, openDownloadCmd(m.service, m.download.FilePath)
+		case "s":
+			if m.download == nil || !m.download.IsComplete() || m.download.FilePath == "" {
+				return m, nil
+			}
+			m.loading = true
+			return m, revealDownloadCmd(m.service, m.download.FilePath)
 		}
 
 	case modeDelete:
@@ -870,24 +986,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 	if m.detail == nil {
 		m.errText = "No torrent selected"
-		return m, nil
+		return *m, nil
 	}
 	if m.detail.Status != "downloaded" {
-		m.errText = "Selected torrent is not ready for download handoff"
-		return m, nil
+		m.errText = "Selected torrent is not ready to download"
+		return *m, nil
 	}
 	targets := app.DownloadTargets(*m.detail)
 	if len(targets) == 0 {
 		m.errText = "No downloadable links available"
-		return m, nil
-	}
-	if action == handoffLaunch && len(m.service.Config().ExternalCommand) == 0 {
-		action = handoffCopy
-		m.status = "No downloader configured; showing the direct URL instead"
+		return *m, nil
 	}
 	m.targets = targetPickerState{Items: targets, Action: action}
 	m.mode = modeChooseTarget
-	return m, nil
+	return *m, nil
 }
 
 func (m Model) View() string {
@@ -1178,10 +1290,13 @@ func executeBatchCopy(service *app.Service, ids []string, torrents []models.Torr
 	return result
 }
 
-func handoffCmd(service *app.Service, target models.DownloadTarget, action handoffAction) tea.Cmd {
+func targetActionCmd(service *app.Service, target models.DownloadTarget, action handoffAction) tea.Cmd {
 	return func() tea.Msg {
 		unrestricted, err := service.ResolveDirectURL(context.Background(), target)
 		if err != nil {
+			if action == handoffDownload {
+				return managedDownloadMsg{err: err}
+			}
 			return handoffMsg{err: err}
 		}
 		url := unrestricted.Download
@@ -1192,16 +1307,37 @@ func handoffCmd(service *app.Service, target models.DownloadTarget, action hando
 		if filename == "" {
 			filename = target.Label
 		}
-		if action == handoffLaunch {
-			result, err := service.LaunchDownload(url, filename)
-			if errors.Is(err, download.ErrNoCommandConfigured) {
-				copied, copyErr := service.CopyURL(url)
-				return handoffMsg{result: models.HandoffResult{URL: url, Copied: copied}, err: copyErr}
-			}
-			return handoffMsg{result: result, err: err}
+		if action == handoffDownload {
+			result, err := service.StartManagedDownload(context.Background(), url, filename)
+			return managedDownloadMsg{result: result, err: err}
 		}
 		copied, err := service.CopyURL(url)
 		return handoffMsg{result: models.HandoffResult{URL: url, Copied: copied}, err: err}
+	}
+}
+
+func downloadTickCmd() tea.Cmd {
+	return tea.Tick(downloadRefreshInterval, func(_ time.Time) tea.Msg {
+		return downloadTickMsg(time.Now())
+	})
+}
+
+func downloadStatusCmd(service *app.Service) tea.Cmd {
+	return func() tea.Msg {
+		download, ok, err := service.ManagedDownloadStatus(context.Background())
+		return managedDownloadStatusMsg{download: download, ok: ok, err: err}
+	}
+}
+
+func openDownloadCmd(service *app.Service, path string) tea.Cmd {
+	return func() tea.Msg {
+		return downloadPathMsg{action: "open", err: service.OpenFile(path)}
+	}
+}
+
+func revealDownloadCmd(service *app.Service, path string) tea.Cmd {
+	return func() tea.Msg {
+		return downloadPathMsg{action: "reveal", err: service.RevealInDirectory(path)}
 	}
 }
 

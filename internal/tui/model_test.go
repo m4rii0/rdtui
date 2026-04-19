@@ -290,6 +290,85 @@ func TestDeleteFromMainView(t *testing.T) {
 	}
 }
 
+func TestDownloadFromMainViewOpensTargetPicker(t *testing.T) {
+	m := Model{
+		mode:       modeMain,
+		returnMode: modeMain,
+		detail: &models.TorrentInfo{
+			Torrent: models.Torrent{ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"}},
+			Files:   []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(Model)
+	if m.mode != modeChooseTarget {
+		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
+	}
+	if m.targets.Action != handoffDownload {
+		t.Fatalf("action = %q, want %q", m.targets.Action, handoffDownload)
+	}
+}
+
+func TestDownloadFromDetailViewOpensTargetPicker(t *testing.T) {
+	m := Model{
+		mode:       modeDetail,
+		returnMode: modeDetail,
+		detail: &models.TorrentInfo{
+			Torrent: models.Torrent{ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"}},
+			Files:   []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(Model)
+	if m.mode != modeChooseTarget {
+		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
+	}
+	if m.targets.Action != handoffDownload {
+		t.Fatalf("action = %q, want %q", m.targets.Action, handoffDownload)
+	}
+}
+
+func TestManagedDownloadMsgEntersDownloadMode(t *testing.T) {
+	m := Model{returnMode: modeDetail}
+
+	updated, cmd := m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}})
+	m = updated.(Model)
+	if m.mode != modeDownload {
+		t.Fatalf("mode = %q, want modeDownload", m.mode)
+	}
+	if m.download == nil || m.download.Filename != "movie.mkv" {
+		t.Fatalf("download = %+v", m.download)
+	}
+	if cmd == nil {
+		t.Fatal("expected polling command after entering download mode")
+	}
+}
+
+func TestManagedDownloadStatusMsgMarksCompletion(t *testing.T) {
+	m := Model{mode: modeDownload, download: &models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}
+
+	updated, _ := m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusComplete}})
+	m = updated.(Model)
+	if m.download == nil || !m.download.IsComplete() {
+		t.Fatalf("download = %+v", m.download)
+	}
+	if m.status != "Download complete" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
+	m := Model{mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
+
+	updated, _ := m.Update(downloadPathMsg{action: "reveal"})
+	m = updated.(Model)
+	if m.status != "Opened download directory" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
 func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 	m := Model{
 		mode:       modeDelete,

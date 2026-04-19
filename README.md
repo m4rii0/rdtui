@@ -8,13 +8,15 @@ This first iteration focuses on:
 - adding magnet links and `.torrent` files
 - selecting files for waiting torrents
 - generating direct download URLs from ready torrents
-- handing those URLs off to your clipboard or an external downloader
+- handing those URLs off to your clipboard
+- downloading resolved links locally through an app-managed `aria2c` session
 - deleting torrents
 
 ## Requirements
 
 - Go 1.26+
 - A Real-Debrid account
+- `aria2c` installed on `PATH` if you want to use managed downloads from inside `rdtui`
 
 ## Build
 
@@ -74,24 +76,14 @@ Example:
 ```json
 {
   "private_token": "",
-  "default_download_dir": "/home/you/Downloads",
-  "external_command": [
-    "aria2c",
-    "--dir",
-    "{{dir}}",
-    "--out",
-    "{{filename}}",
-    "{{url}}"
-  ]
+	  "default_download_dir": "/home/you/Downloads",
+	  "aria2c_path": ""
 }
 ```
 
-Supported downloader placeholders:
-- `{{url}}`
-- `{{dir}}`
-- `{{filename}}`
-
-If no `external_command` is configured, `rdtui` will still resolve and show direct URLs and will try to copy them to the clipboard when possible.
+- `default_download_dir` controls where managed downloads are saved.
+- `aria2c_path` is optional. Leave it empty to use `aria2c` from `PATH`.
+- Older `external_command` entries are ignored by the managed download flow and will disappear the next time `rdtui` saves config.
 
 ### `auth.json`
 
@@ -109,9 +101,15 @@ Key bindings:
 - `i`: browse the filesystem and import one or more local `.torrent` files
 - `s`: select files for a torrent in `waiting_files_selection`
 - `y`: resolve a ready torrent target to a direct URL and show or copy it
-- `x`: resolve a ready torrent target and launch the configured downloader
-- `d`: delete the selected torrent
+- `d`: resolve a ready torrent target and start a managed local download with `aria2c`
+- `x`: delete the selected torrent
 - `q`: quit
+
+### Managed Download
+
+Press `d` on a ready torrent to resolve the selected target and start a managed local download. `rdtui` starts its own loopback-only `aria2c` RPC session, shows a dedicated progress screen, and lets you refresh progress, open the completed file, or reveal it in its directory.
+
+If you only want the direct URL, press `y` instead. That flow still shows the URL and copies it to the clipboard when possible without starting `aria2c`.
 
 ### File Selection
 

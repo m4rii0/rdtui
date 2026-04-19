@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/m4rii0/rdtui/internal/aria2"
 	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/internal/download"
@@ -14,12 +16,21 @@ import (
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
+type downloadManager interface {
+	SetBinaryPath(string)
+	StartDownload(context.Context, aria2.DownloadRequest) (models.ManagedDownload, error)
+	DownloadStatus(context.Context, string) (models.ManagedDownload, error)
+	Shutdown(context.Context) error
+}
+
 type Service struct {
-	store   *config.Store
-	config  config.Config
-	auth    *auth.Manager
-	client  *realdebrid.Client
-	session *models.AuthSession
+	store          *config.Store
+	config         config.Config
+	auth           *auth.Manager
+	client         *realdebrid.Client
+	session        *models.AuthSession
+	downloader     downloadManager
+	activeDownload *models.ManagedDownload
 }
 
 func New() (*Service, error) {
@@ -32,9 +43,10 @@ func New() (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		store:  store,
-		config: cfg,
-		auth:   auth.NewManager(store, cfg),
+		store:      store,
+		config:     cfg,
+		auth:       auth.NewManager(store, cfg),
+		downloader: aria2.NewManager(cfg.Aria2BinaryPath),
 	}, nil
 }
 
@@ -165,22 +177,82 @@ func (s *Service) CopyURL(url string) (bool, error) {
 	return download.CopyURL(url)
 }
 
-func (s *Service) LaunchDownload(url, filename string) (models.HandoffResult, error) {
-	return download.Launch(s.config.ExternalCommand, download.TemplateData{
+func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
+	if current, ok, err := s.ManagedDownloadStatus(ctx); err == nil && ok && !current.IsTerminal() {
+		return models.ManagedDownloadStart{Download: current, Reused: true}, nil
+	}
+
+	request := aria2.DownloadRequest{
 		URL:      url,
 		Dir:      s.config.DefaultDownloadDir,
 		Filename: download.FilenameForURL(url, filename),
-	})
+	}
+	started, err := s.downloader.StartDownload(ctx, request)
+	if err != nil {
+		return models.ManagedDownloadStart{}, err
+	}
+	if started.URL == "" {
+		started.URL = url
+	}
+	if started.Filename == "" {
+		started.Filename = request.Filename
+	}
+	if started.Directory == "" {
+		started.Directory = request.Dir
+	}
+	s.activeDownload = &started
+	return models.ManagedDownloadStart{Download: started}, nil
 }
 
-func (s *Service) SaveExternalCommand(command []string) error {
-	s.config.ExternalCommand = append([]string(nil), command...)
-	return s.store.SaveConfig(s.config)
+func (s *Service) ManagedDownloadStatus(ctx context.Context) (models.ManagedDownload, bool, error) {
+	if s.activeDownload == nil {
+		return models.ManagedDownload{}, false, nil
+	}
+
+	status, err := s.downloader.DownloadStatus(ctx, s.activeDownload.GID)
+	if err != nil {
+		failed := *s.activeDownload
+		if !failed.IsTerminal() {
+			failed.Status = models.ManagedDownloadStatusError
+		}
+		failed.ErrorMessage = err.Error()
+		s.activeDownload = &failed
+		return failed, true, err
+	}
+
+	if status.URL == "" {
+		status.URL = s.activeDownload.URL
+	}
+	if status.Filename == "" {
+		status.Filename = s.activeDownload.Filename
+	}
+	if status.Directory == "" {
+		status.Directory = s.activeDownload.Directory
+	}
+	if status.FilePath == "" {
+		status.FilePath = s.activeDownload.FilePath
+	}
+	s.activeDownload = &status
+	return status, true, nil
 }
 
 func (s *Service) SavePrivateToken(token string) error {
 	s.config.PrivateToken = token
 	return s.store.SaveConfig(s.config)
+}
+
+func (s *Service) OpenFile(path string) error {
+	return download.OpenFile(path)
+}
+
+func (s *Service) RevealInDirectory(path string) error {
+	return download.RevealInDirectory(path)
+}
+
+func (s *Service) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.downloader.Shutdown(ctx)
 }
 
 func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {

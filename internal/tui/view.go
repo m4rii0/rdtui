@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/internal/debug"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 var (
@@ -47,6 +48,8 @@ func renderView(m Model) string {
 		body = renderDeviceAuth(m)
 	case modeDetail:
 		body = renderDetailView(m)
+	case modeDownload:
+		body = renderDownloadView(m)
 	case modeMain, modeSearch:
 		body = renderMain(m)
 	default:
@@ -254,6 +257,62 @@ func renderDetailView(m Model) string {
 	return strings.Join(lines, "\n")
 }
 
+func renderDownloadView(m Model) string {
+	width := m.width
+	if width <= 0 {
+		width = 120
+	}
+	innerWidth := max(20, width-4)
+
+	header := headStyle.Render("rdtui")
+	if m.version != "" {
+		header += " " + mutedStyle.Render("v"+m.version)
+	}
+	if m.session != nil {
+		header += "  " + mutedStyle.Render("user: "+m.session.User.Username)
+	}
+
+	lines := []string{header, ""}
+	if m.download == nil {
+		lines = append(lines, mutedStyle.Render("Preparing managed download..."))
+	} else {
+		d := m.download
+		stats := []string{
+			"Managed Download",
+			"",
+			fmt.Sprintf("  File:        %s", d.Filename),
+			fmt.Sprintf("  Status:      %s", managedDownloadStatusLabel(d.Status)),
+			fmt.Sprintf("  Progress:    %.1f%%", d.Progress()),
+			fmt.Sprintf("  Transferred: %s / %s", humanBytes(d.CompletedLength), humanBytes(d.TotalLength)),
+			fmt.Sprintf("  Speed:       %s/s", humanBytes(d.DownloadSpeed)),
+			fmt.Sprintf("  ETA:         %s", formatETA(d.ETA())),
+		}
+		if d.Connections > 0 {
+			stats = append(stats, fmt.Sprintf("  Connections: %d", d.Connections))
+		}
+		if d.FilePath != "" {
+			stats = append(stats, fmt.Sprintf("  Path:        %s", d.FilePath))
+		} else if d.Directory != "" {
+			stats = append(stats, fmt.Sprintf("  Directory:   %s", d.Directory))
+		}
+		if d.ErrorMessage != "" {
+			stats = append(stats, "", errorStyle.Render(d.ErrorMessage))
+		}
+		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(stats, "\n")))
+	}
+	if m.status != "" {
+		lines = append(lines, mutedStyle.Render(m.status))
+	}
+	if m.errText != "" {
+		lines = append(lines, errorStyle.Render(m.errText))
+	}
+	lines = append(lines, downloadFooter(m.download))
+	if m.loading {
+		lines = append(lines, mutedStyle.Render("Working..."))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func renderTorrentList(m Model, width, height int) string {
 	if height <= 0 {
 		height = 20
@@ -338,8 +397,8 @@ func renderModal(m Model) string {
 	case modeChooseTarget:
 		var lines []string
 		verb := "Copy URL"
-		if m.targets.Action == handoffLaunch {
-			verb = "Launch downloader"
+		if m.targets.Action == handoffDownload {
+			verb = "Download"
 		}
 		lines = append(lines, verb+" for:", "")
 		for idx, item := range m.targets.Items {
@@ -393,15 +452,41 @@ func listFooter(m Model) string {
 	if m.batchMode {
 		return mutedStyle.Render(fmt.Sprintf("[BATCH] space=mark  ctrl+a=all  ctrl+d=clear  x=delete  y=copy  b/esc=exit  │  Marked: %d", len(m.batchSelected)))
 	}
-	return mutedStyle.Render("↑↓ j/k enter S/P/Z/D/N=sort /search r=refresh m magnet u url i import b batch s select y copy x delete q")
+	return mutedStyle.Render("↑↓ j/k enter S/P/Z/D/N=sort /search r=refresh m magnet u url i import b batch s select y copy d download x delete q")
 }
 
 func detailFooter() string {
-	return mutedStyle.Render("esc=back  s=select  y=copy  x=delete  r=refresh")
+	return mutedStyle.Render("esc=back  s=select  y=copy  d=download  x=delete  r=refresh")
+}
+
+func downloadFooter(download *models.ManagedDownload) string {
+	if download != nil && download.IsComplete() {
+		return mutedStyle.Render("esc=back  o=open  s=reveal  r=refresh")
+	}
+	return mutedStyle.Render("esc=back  r=refresh")
 }
 
 func statusLabel(status string) string {
 	return styledStatusLabel(status, statusLabelPlain(status))
+}
+
+func managedDownloadStatusLabel(status models.ManagedDownloadStatus) string {
+	text := string(status)
+	if text == "" {
+		text = "unknown"
+	}
+	switch status {
+	case models.ManagedDownloadStatusComplete:
+		return statusDownloadedStyle.Render(text)
+	case models.ManagedDownloadStatusActive:
+		return statusDownloadingStyle.Render(text)
+	case models.ManagedDownloadStatusWaiting, models.ManagedDownloadStatusPaused:
+		return statusWaitingStyle.Render(text)
+	case models.ManagedDownloadStatusError, models.ManagedDownloadStatusRemoved:
+		return statusErrorStyle.Render(text)
+	default:
+		return mutedStyle.Render(text)
+	}
 }
 
 func styledStatusLabel(status, text string) string {
@@ -475,6 +560,34 @@ func formatProgress(progress float64) string {
 		return fmt.Sprintf("%.0f", progress)
 	}
 	return fmt.Sprintf("%.2f", progress)
+}
+
+func formatETA(value time.Duration) string {
+	if value < 0 {
+		return "Calculating..."
+	}
+	if value == 0 {
+		return "0s"
+	}
+	return formatDuration(value)
+}
+
+func formatDuration(value time.Duration) string {
+	if value < 0 {
+		value = -value
+	}
+	hours := int(value / time.Hour)
+	value -= time.Duration(hours) * time.Hour
+	minutes := int(value / time.Minute)
+	value -= time.Duration(minutes) * time.Minute
+	seconds := int(value / time.Second)
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func torrentListWindow(total, selected, visible int) (int, int) {

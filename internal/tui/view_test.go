@@ -162,3 +162,12 @@ func TestPadVisual(t *testing.T) {
 		t.Fatalf("truncated width = %d, want 4: %q", lipgloss.Width(got), got)
 	}
 }
+
+func TestFootersMentionManagedDownload(t *testing.T) {
+	if got := listFooter(Model{}); !strings.Contains(got, "d download") {
+		t.Fatalf("listFooter() = %q, want managed download hint", got)
+	}
+	if got := detailFooter(); !strings.Contains(got, "d=download") {
+		t.Fatalf("detailFooter() = %q, want managed download hint", got)
+	}
+}

@@ -13,9 +13,9 @@ import (
 const appName = "rdtui"
 
 type Config struct {
-	PrivateToken       string   `json:"private_token,omitempty"`
-	DefaultDownloadDir string   `json:"default_download_dir,omitempty"`
-	ExternalCommand    []string `json:"external_command,omitempty"`
+	PrivateToken       string `json:"private_token,omitempty"`
+	DefaultDownloadDir string `json:"default_download_dir,omitempty"`
+	Aria2BinaryPath    string `json:"aria2c_path,omitempty"`
 
 	// Optional test overrides.
 	APIBaseURL   string `json:"api_base_url,omitempty"`
