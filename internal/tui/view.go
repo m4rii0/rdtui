@@ -51,8 +51,12 @@ func renderView(m Model) string {
 }
 
 func renderAuthChoice(m Model) string {
+	title := headStyle.Render("rdtui")
+	if m.version != "" {
+		title += " " + mutedStyle.Render("v" + m.version)
+	}
 	lines := []string{
-		headStyle.Render("rdtui"),
+		title,
 		"",
 		"Choose an authentication method:",
 		"  1. Private API token",
@@ -70,8 +74,12 @@ func renderAuthChoice(m Model) string {
 }
 
 func renderInput(m Model) string {
+	title := headStyle.Render("rdtui")
+	if m.version != "" {
+		title += " " + mutedStyle.Render("v" + m.version)
+	}
 	lines := []string{
-		headStyle.Render("rdtui"),
+		title,
 		"",
 		m.inputPrompt,
 		m.input.View(),
@@ -85,8 +93,12 @@ func renderInput(m Model) string {
 }
 
 func renderDeviceAuth(m Model) string {
+	title := headStyle.Render("rdtui")
+	if m.version != "" {
+		title += " " + mutedStyle.Render("v" + m.version)
+	}
 	lines := []string{
-		headStyle.Render("rdtui"),
+		title,
 		"",
 		"Complete device authentication:",
 	}
@@ -137,6 +149,9 @@ func renderMain(m Model) string {
 	tableHeight := max(4, bodyHeight-reserved)
 
 	header := headStyle.Render("rdtui")
+	if m.version != "" {
+		header += " " + mutedStyle.Render("v" + m.version)
+	}
 	if m.session != nil {
 		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
 	}
@@ -168,6 +183,9 @@ func renderDetailView(m Model) string {
 	innerWidth := max(20, width-4)
 
 	header := headStyle.Render("rdtui")
+	if m.version != "" {
+		header += " " + mutedStyle.Render("v" + m.version)
+	}
 	if m.session != nil {
 		header += "  " + mutedStyle.Render("user: " + m.session.User.Username)
 	}

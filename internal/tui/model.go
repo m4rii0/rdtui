@@ -15,6 +15,7 @@ import (
 	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/internal/realdebrid"
+	"github.com/m4rii0/rdtui/internal/version"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -68,6 +69,7 @@ type targetPickerState struct {
 type Model struct {
 	service *app.Service
 
+	version    string
 	mode       mode
 	returnMode mode
 	width      int
@@ -159,6 +161,7 @@ func NewModel(service *app.Service) Model {
 	ti.Width = 64
 	return Model{
 		service:       service,
+		version:       version.Version,
 		mode:          modeStarting,
 		returnMode:    modeMain,
 		input:         ti,
