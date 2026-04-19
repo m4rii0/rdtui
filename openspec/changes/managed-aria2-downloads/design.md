@@ -85,7 +85,7 @@ The download view will show:
 - ETA when available
 - completion or error state
 
-On completion, the view will offer open-file and reveal-directory actions.
+On completion, the view will offer open-file, reveal-directory, and delete-torrent actions.
 
 Why this decision:
 - it keeps the new behavior explicit and easy to discover
@@ -108,15 +108,19 @@ Why this decision:
 Alternative considered:
 - allow multiple active downloads immediately: useful, but it expands the UI and state surface significantly
 
-### 6. Keep config minimal and deprecate the external launcher path
+### 6. Keep config minimal while making aria2 optional
 
-The managed flow will continue using `default_download_dir` and add a small optional override for the `aria2c` binary path. The app will no longer treat `external_command` as the supported download workflow.
+The managed flow will continue using `default_download_dir` and add a small optional override for the `aria2c` binary path, but the actual download backend will be configurable. `rdtui` will support:
+- `download_backend = "aria2"` to use the managed `aria2c` process
+- `download_backend = "direct"` to fall back to a built-in HTTP download without `aria2c`
+
+The app will no longer treat `external_command` as the supported download workflow.
 
 Existing `external_command` data will be ignored by the new flow and will naturally disappear the next time config is saved without that field.
 
 Why this decision:
-- the app now owns downloader startup directly, so a generic launcher is no longer the main path
-- keeping config minimal avoids letting users override app-critical RPC settings accidentally
+- the app still owns downloader startup directly when aria2 is selected, so a generic launcher is no longer the main path
+- a small backend switch is enough to make aria2 optional without exposing app-critical RPC settings accidentally
 - ignoring the legacy field is sufficient because the config is local and JSON decoding already tolerates unknown fields
 
 Alternative considered:

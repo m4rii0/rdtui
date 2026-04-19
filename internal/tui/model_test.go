@@ -369,6 +369,27 @@ func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
+	m := Model{
+		mode:              modeDownload,
+		returnMode:        modeDetail,
+		download:          &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete},
+		downloadTorrentID: "torrent-1",
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if m.mode != modeDelete {
+		t.Fatalf("mode = %q, want modeDelete", m.mode)
+	}
+	if m.returnMode != modeDownload {
+		t.Fatalf("returnMode = %q, want modeDownload", m.returnMode)
+	}
+	if len(m.deleteIDs) != 1 || m.deleteIDs[0] != "torrent-1" {
+		t.Fatalf("deleteIDs = %v", m.deleteIDs)
+	}
+}
+
 func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 	m := Model{
 		mode:       modeDelete,

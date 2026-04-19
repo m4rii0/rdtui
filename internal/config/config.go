@@ -15,6 +15,7 @@ const appName = "rdtui"
 type Config struct {
 	PrivateToken       string `json:"private_token,omitempty"`
 	DefaultDownloadDir string `json:"default_download_dir,omitempty"`
+	DownloadBackend    string `json:"download_backend,omitempty"`
 	Aria2BinaryPath    string `json:"aria2c_path,omitempty"`
 
 	// Optional test overrides.
@@ -83,6 +84,11 @@ func (s *Store) LoadConfig() (Config, error) {
 		if err == nil {
 			cfg.DefaultDownloadDir = filepath.Join(home, "Downloads")
 		}
+	}
+	switch models.DownloadBackend(cfg.DownloadBackend) {
+	case models.DownloadBackendAria2, models.DownloadBackendDirect:
+	default:
+		cfg.DownloadBackend = string(models.DownloadBackendAria2)
 	}
 
 	return cfg, nil

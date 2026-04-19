@@ -16,7 +16,7 @@ This first iteration focuses on:
 
 - Go 1.26+
 - A Real-Debrid account
-- `aria2c` installed on `PATH` if you want to use managed downloads from inside `rdtui`
+- `aria2c` installed on `PATH` only if you want to use the optional `aria2` download backend
 
 ## Build
 
@@ -77,12 +77,14 @@ Example:
 {
   "private_token": "",
 	  "default_download_dir": "/home/you/Downloads",
+	  "download_backend": "aria2",
 	  "aria2c_path": ""
 }
 ```
 
 - `default_download_dir` controls where managed downloads are saved.
-- `aria2c_path` is optional. Leave it empty to use `aria2c` from `PATH`.
+- `download_backend` supports `aria2` or `direct`.
+- `aria2c_path` is optional and only used when `download_backend` is `aria2`. Leave it empty to use `aria2c` from `PATH`.
 - Older `external_command` entries are ignored by the managed download flow and will disappear the next time `rdtui` saves config.
 
 ### `auth.json`
@@ -107,7 +109,11 @@ Key bindings:
 
 ### Managed Download
 
-Press `d` on a ready torrent to resolve the selected target and start a managed local download. `rdtui` starts its own loopback-only `aria2c` RPC session, shows a dedicated progress screen, and lets you refresh progress, open the completed file, or reveal it in its directory.
+Press `d` on a ready torrent to resolve the selected target and start a managed local download. `rdtui` shows a dedicated progress screen and lets you refresh progress, open the completed file, reveal it in its directory, or delete the source torrent once the download has completed.
+
+When `download_backend` is `aria2`, `rdtui` starts its own loopback-only `aria2c` RPC session for the download.
+
+When `download_backend` is `direct`, `rdtui` falls back to a built-in HTTP download and does not require `aria2c`.
 
 If you only want the direct URL, press `y` instead. That flow still shows the URL and copies it to the clipboard when possible without starting `aria2c`.
 

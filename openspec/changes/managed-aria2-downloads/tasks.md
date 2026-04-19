@@ -6,7 +6,7 @@
 
 ## 2. Config and App Orchestration
 
-- [x] 2.1 Add `aria2c` binary path configuration while keeping `default_download_dir` as the managed download destination.
+- [x] 2.1 Add download backend configuration, keep `default_download_dir` as the managed download destination, and support an optional `aria2c` binary path when aria2 is selected.
 - [x] 2.2 Treat legacy `external_command` config as ignored compatibility data and remove the launcher-oriented service path as the supported workflow.
 - [x] 2.3 Add shared models and app service methods for starting, reopening, and polling a single active managed download session.
 
@@ -14,7 +14,7 @@
 
 - [x] 3.1 Add `d` key handling in list and detail views and reuse the target picker to start managed downloads from ready torrents.
 - [x] 3.2 Add a dedicated managed download mode with periodic aria2 status refresh, active/completed/error rendering, and reopen behavior for an already-active session.
-- [x] 3.3 Implement completion actions to open the downloaded file or reveal its directory and return cleanly to the torrent workflow.
+- [x] 3.3 Implement completion actions to open the downloaded file, reveal its directory, or delete the source torrent and return cleanly to the torrent workflow.
 - [x] 3.4 Update footer text, modal labels, and status messages so `y` remains direct URL handoff, `d` is managed download, and stale launcher wording is removed.
 
 ## 4. Documentation and Verification

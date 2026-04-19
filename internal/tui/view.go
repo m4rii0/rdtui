@@ -55,6 +55,8 @@ func renderView(m Model) string {
 	default:
 		if m.returnMode == modeDetail {
 			body = renderDetailView(m)
+		} else if m.returnMode == modeDownload {
+			body = renderDownloadView(m)
 		} else {
 			body = renderMain(m)
 		}
@@ -306,7 +308,10 @@ func renderDownloadView(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, errorStyle.Render(m.errText))
 	}
-	lines = append(lines, downloadFooter(m.download))
+	if modal := renderModal(m); modal != "" {
+		lines = append(lines, "", boxStyle.Render(modal))
+	}
+	lines = append(lines, downloadFooter(m.download, m.downloadTorrentID != ""))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -459,9 +464,14 @@ func detailFooter() string {
 	return mutedStyle.Render("esc=back  s=select  y=copy  d=download  x=delete  r=refresh")
 }
 
-func downloadFooter(download *models.ManagedDownload) string {
+func downloadFooter(download *models.ManagedDownload, canDeleteTorrent bool) string {
 	if download != nil && download.IsComplete() {
-		return mutedStyle.Render("esc=back  o=open  s=reveal  r=refresh")
+		footer := "esc=back  o=open  s=reveal"
+		if canDeleteTorrent {
+			footer += "  x=delete torrent"
+		}
+		footer += "  r=refresh"
+		return mutedStyle.Render(footer)
 	}
 	return mutedStyle.Render("esc=back  r=refresh")
 }

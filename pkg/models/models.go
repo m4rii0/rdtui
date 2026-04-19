@@ -85,6 +85,19 @@ type DownloadTarget struct {
 	FilePath string
 }
 
+type DownloadBackend string
+
+const (
+	DownloadBackendAria2  DownloadBackend = "aria2"
+	DownloadBackendDirect DownloadBackend = "direct"
+)
+
+type ManagedDownloadRequest struct {
+	URL      string
+	Dir      string
+	Filename string
+}
+
 type ManagedDownloadStatus string
 
 const (

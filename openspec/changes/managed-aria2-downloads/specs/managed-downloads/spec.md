@@ -31,19 +31,23 @@ The application SHALL provide a dedicated download view that shows the active ma
 
 #### Scenario: Download completes
 - **WHEN** aria2 reports the active managed download as `complete`
-- **THEN** the application keeps the completed state visible and offers actions to open the file or reveal its directory
+- **THEN** the application keeps the completed state visible and offers actions to open the file, reveal its directory, or delete the source torrent
 
 #### Scenario: Download fails
 - **WHEN** aria2 reports the active managed download as `error` or the managed aria2 process exits unexpectedly
 - **THEN** the application shows the failure and lets the user return to the torrent workflow
 
-### Requirement: Managed download configuration stays minimal and app-owned
-The application SHALL use `default_download_dir` and MAY allow an optional `aria2c` binary path override, but SHALL keep RPC port, secret, and process lifecycle under application control.
+### Requirement: Managed download configuration supports aria2 or direct mode
+The application SHALL use `default_download_dir` and SHALL allow the user to choose between an `aria2` backend and a built-in `direct` backend. When `aria2` is selected, the application MAY allow an optional `aria2c` binary path override and SHALL keep RPC port, secret, and process lifecycle under application control.
 
 #### Scenario: Default aria2 binary path is used
-- **WHEN** no aria2 binary path override is configured
+- **WHEN** `download_backend` is `aria2` and no aria2 binary path override is configured
 - **THEN** the application looks up `aria2c` on `PATH` when starting the managed downloader
 
 #### Scenario: Configured aria2 binary path is used
-- **WHEN** the user configures an aria2 binary path override
+- **WHEN** `download_backend` is `aria2` and the user configures an aria2 binary path override
 - **THEN** the application starts that binary instead of the `PATH` default
+
+#### Scenario: Direct backend is selected
+- **WHEN** `download_backend` is `direct`
+- **THEN** the application downloads the resolved URL with its built-in HTTP downloader instead of starting `aria2c`

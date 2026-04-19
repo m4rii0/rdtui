@@ -11,6 +11,7 @@ import (
 	"github.com/m4rii0/rdtui/internal/aria2"
 	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/directdl"
 	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/pkg/models"
@@ -18,7 +19,7 @@ import (
 
 type downloadManager interface {
 	SetBinaryPath(string)
-	StartDownload(context.Context, aria2.DownloadRequest) (models.ManagedDownload, error)
+	StartDownload(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error)
 	DownloadStatus(context.Context, string) (models.ManagedDownload, error)
 	Shutdown(context.Context) error
 }
@@ -46,8 +47,17 @@ func New() (*Service, error) {
 		store:      store,
 		config:     cfg,
 		auth:       auth.NewManager(store, cfg),
-		downloader: aria2.NewManager(cfg.Aria2BinaryPath),
+		downloader: newDownloadManager(cfg),
 	}, nil
+}
+
+func newDownloadManager(cfg config.Config) downloadManager {
+	switch models.DownloadBackend(cfg.DownloadBackend) {
+	case models.DownloadBackendDirect:
+		return directdl.NewManager()
+	default:
+		return aria2.NewManager(cfg.Aria2BinaryPath)
+	}
 }
 
 func (s *Service) Config() config.Config {
@@ -182,7 +192,7 @@ func (s *Service) StartManagedDownload(ctx context.Context, url, filename string
 		return models.ManagedDownloadStart{Download: current, Reused: true}, nil
 	}
 
-	request := aria2.DownloadRequest{
+	request := models.ManagedDownloadRequest{
 		URL:      url,
 		Dir:      s.config.DefaultDownloadDir,
 		Filename: download.FilenameForURL(url, filename),

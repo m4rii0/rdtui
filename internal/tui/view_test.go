@@ -171,3 +171,10 @@ func TestFootersMentionManagedDownload(t *testing.T) {
 		t.Fatalf("detailFooter() = %q, want managed download hint", got)
 	}
 }
+
+func TestDownloadFooterMentionsTorrentDeleteWhenAvailable(t *testing.T) {
+	got := downloadFooter(&models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}, true)
+	if !strings.Contains(got, "x=delete torrent") {
+		t.Fatalf("downloadFooter() = %q, want delete torrent hint", got)
+	}
+}

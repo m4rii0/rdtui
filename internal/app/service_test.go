@@ -7,6 +7,7 @@ import (
 
 	"github.com/m4rii0/rdtui/internal/aria2"
 	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/directdl"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -33,7 +34,7 @@ func TestStartManagedDownloadUsesConfiguredDirAndFilename(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeDownloadManager{
-		startDownload: func(_ context.Context, req aria2.DownloadRequest) (models.ManagedDownload, error) {
+		startDownload: func(_ context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
 			if req.Dir != "/tmp/downloads" {
 				t.Fatalf("download dir = %q", req.Dir)
 			}
@@ -119,15 +120,29 @@ func TestManagedDownloadStatusPreservesCachedMetadata(t *testing.T) {
 	}
 }
 
+func TestNewDownloadManagerSelectsDirectBackend(t *testing.T) {
+	t.Parallel()
+
+	manager := newDownloadManager(config.Config{DownloadBackend: string(models.DownloadBackendDirect)})
+	if _, ok := manager.(*directdl.Manager); !ok {
+		t.Fatalf("manager = %T, want *directdl.Manager", manager)
+	}
+
+	manager = newDownloadManager(config.Config{DownloadBackend: string(models.DownloadBackendAria2)})
+	if _, ok := manager.(*aria2.Manager); !ok {
+		t.Fatalf("manager = %T, want *aria2.Manager", manager)
+	}
+}
+
 type fakeDownloadManager struct {
 	startCalls     int
-	startDownload  func(context.Context, aria2.DownloadRequest) (models.ManagedDownload, error)
+	startDownload  func(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error)
 	downloadStatus func(context.Context, string) (models.ManagedDownload, error)
 }
 
 func (f *fakeDownloadManager) SetBinaryPath(string) {}
 
-func (f *fakeDownloadManager) StartDownload(ctx context.Context, req aria2.DownloadRequest) (models.ManagedDownload, error) {
+func (f *fakeDownloadManager) StartDownload(ctx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
 	f.startCalls++
 	if f.startDownload == nil {
 		return models.ManagedDownload{}, nil

@@ -116,13 +116,14 @@ type Model struct {
 	inputAction inputAction
 	searchInput textinput.Model
 
-	deviceCode *models.DeviceCode
-	browser    fileBrowserState
-	selector   selectFilesState
-	targets    targetPickerState
-	showURL    string
-	download   *models.ManagedDownload
-	deleteIDs  []string
+	deviceCode        *models.DeviceCode
+	browser           fileBrowserState
+	selector          selectFilesState
+	targets           targetPickerState
+	showURL           string
+	download          *models.ManagedDownload
+	downloadTorrentID string
+	deleteIDs         []string
 }
 
 type bootstrapMsg struct {
@@ -404,6 +405,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errText = msg.err.Error()
 			return m, nil
+		}
+		if m.returnMode == modeDownload {
+			m.downloadTorrentID = ""
 		}
 		m.mode = modeMain
 		m.status = "Deleted torrent"
@@ -921,6 +925,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.targets.Items) == 0 {
 				return m, nil
 			}
+			if m.targets.Action == handoffDownload && m.detail != nil {
+				m.downloadTorrentID = m.detail.ID
+			}
 			m.loading = true
 			return m, targetActionCmd(m.service, m.targets.Items[m.targets.Cursor], m.targets.Action)
 		}
@@ -956,6 +963,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.loading = true
 			return m, revealDownloadCmd(m.service, m.download.FilePath)
+		case "x":
+			if m.download == nil || !m.download.IsComplete() || m.downloadTorrentID == "" {
+				return m, nil
+			}
+			m.returnMode = modeDownload
+			m.mode = modeDelete
+			m.deleteIDs = []string{m.downloadTorrentID}
+			return m, nil
 		}
 
 	case modeDelete:

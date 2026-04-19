@@ -29,12 +29,6 @@ const (
 	startAttempts              = 3
 )
 
-type DownloadRequest struct {
-	URL      string
-	Dir      string
-	Filename string
-}
-
 type rpcClient interface {
 	AddURI([]string, *arigo.Options) (arigo.GID, error)
 	TellStatus(string, ...string) (arigo.Status, error)
@@ -88,7 +82,7 @@ func (m *Manager) SetBinaryPath(path string) {
 	m.binaryPath = path
 }
 
-func (m *Manager) StartDownload(ctx context.Context, req DownloadRequest) (models.ManagedDownload, error) {
+func (m *Manager) StartDownload(ctx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
 	if err := m.ensureStarted(ctx); err != nil {
 		return models.ManagedDownload{}, err
 	}
@@ -310,7 +304,7 @@ func buildCommandArgs(port int, secret string) []string {
 	}
 }
 
-func buildOptions(req DownloadRequest) *arigo.Options {
+func buildOptions(req models.ManagedDownloadRequest) *arigo.Options {
 	return &arigo.Options{
 		Dir:                    req.Dir,
 		Out:                    req.Filename,
