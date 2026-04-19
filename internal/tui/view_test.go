@@ -182,7 +182,8 @@ func TestDownloadFooterMentionsTorrentDeleteWhenAvailable(t *testing.T) {
 
 func TestOverwriteModalShowsByteDiff(t *testing.T) {
 	m := Model{
-		mode: modeOverwrite,
+		mode:  modeOverwrite,
+		width: 120,
 		pendingDownload: &pendingDownloadState{
 			Filename:      "movie.mkv",
 			Path:          "/tmp/movie.mkv",
@@ -191,11 +192,11 @@ func TestOverwriteModalShowsByteDiff(t *testing.T) {
 		},
 	}
 
-	got := ansi.Strip(renderModal(m))
+	got := ansi.Strip(renderOverwritePopup(m))
 	if !strings.Contains(got, "Diff:") {
-		t.Fatalf("renderModal() = %q, want diff line", got)
+		t.Fatalf("renderOverwritePopup() = %q, want diff line", got)
 	}
 	if !strings.Contains(got, "smaller than remote") {
-		t.Fatalf("renderModal() = %q, want size comparison", got)
+		t.Fatalf("renderOverwritePopup() = %q, want size comparison", got)
 	}
 }

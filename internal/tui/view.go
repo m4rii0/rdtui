@@ -36,35 +36,11 @@ var (
 
 func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
-	if m.mode == modeFileBrowser {
-		return renderFileBrowserPopup(m)
+	if isPopupMode(m.mode) {
+		_ = appStyle.Render(renderBackground(m))
+		return renderOverlay(m.width, m.height, renderPopupContent(m))
 	}
-	var body string
-	switch m.mode {
-	case modeStarting:
-		body = "Starting..."
-	case modeAuthChoice:
-		body = renderAuthChoice(m)
-	case modeTokenInput, modeMagnetInput, modeURLInput:
-		body = renderInput(m)
-	case modeDeviceAuth:
-		body = renderDeviceAuth(m)
-	case modeDetail:
-		body = renderDetailView(m)
-	case modeDownload:
-		body = renderDownloadView(m)
-	case modeMain, modeSearch:
-		body = renderMain(m)
-	default:
-		if m.returnMode == modeDetail {
-			body = renderDetailView(m)
-		} else if m.returnMode == modeDownload {
-			body = renderDownloadView(m)
-		} else {
-			body = renderMain(m)
-		}
-	}
-	return appStyle.Render(body)
+	return appStyle.Render(renderBackground(m))
 }
 
 func renderAuthChoice(m Model) string {
@@ -188,8 +164,8 @@ func renderMain(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, errorStyle.Render(m.errText))
 	}
-	if modal := renderModal(m); modal != "" {
-		lines = append(lines, "", boxStyle.Render(modal))
+	if flash := renderFlash(m); flash != "" {
+		lines = append(lines, flash)
 	}
 	lines = append(lines, truncateLine(listFooter(m), innerWidth))
 	if m.loading {
@@ -252,8 +228,8 @@ func renderDetailView(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, errorStyle.Render(m.errText))
 	}
-	if modal := renderModal(m); modal != "" {
-		lines = append(lines, "", boxStyle.Render(modal))
+	if flash := renderFlash(m); flash != "" {
+		lines = append(lines, flash)
 	}
 	lines = append(lines, truncateLine(detailFooter(), innerWidth))
 	if m.loading {
@@ -311,8 +287,8 @@ func renderDownloadView(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, errorStyle.Render(m.errText))
 	}
-	if modal := renderModal(m); modal != "" {
-		lines = append(lines, "", boxStyle.Render(modal))
+	if flash := renderFlash(m); flash != "" {
+		lines = append(lines, flash)
 	}
 	lines = append(lines, truncateLine(downloadFooter(m.download, m.downloadTorrentID != ""), innerWidth))
 	if m.loading {
@@ -383,85 +359,6 @@ func renderTorrentList(m Model, width, height int) string {
 	lines := []string{title, header}
 	lines = append(lines, bodyLines...)
 	return strings.Join(fitLines(lines, height), "\n")
-}
-
-func renderModal(m Model) string {
-	switch m.mode {
-	case modeSelectFiles:
-		var lines []string
-		lines = append(lines, "Select files for torrent", "", "Space=toggle  Enter=confirm  Esc=cancel", "")
-		for idx, file := range m.selector.Files {
-			cursor := "  "
-			if idx == m.selector.Cursor {
-				cursor = "> "
-			}
-			marker := "[ ]"
-			if m.selector.Selected[file.ID] {
-				marker = "[x]"
-			}
-			lines = append(lines, fmt.Sprintf("%s%s %s (%s)", cursor, marker, file.Path, humanBytes(file.Bytes)))
-		}
-		return strings.Join(lines, "\n")
-	case modeChooseTarget:
-		var lines []string
-		verb := "Copy URL"
-		if m.targets.Action == handoffDownload {
-			verb = "Download"
-		}
-		lines = append(lines, verb+" for:", "")
-		for idx, item := range m.targets.Items {
-			prefix := "  "
-			if idx == m.targets.Cursor {
-				prefix = "> "
-			}
-			label := item.Label
-			if item.FilePath != "" {
-				label = fmt.Sprintf("%s (%s)", label, item.FilePath)
-			}
-			lines = append(lines, prefix+label)
-		}
-		lines = append(lines, "", mutedStyle.Render("Enter=confirm  Esc=cancel"))
-		return strings.Join(lines, "\n")
-	case modeOverwrite:
-		if m.pendingDownload == nil {
-			return ""
-		}
-		pending := m.pendingDownload
-		lines := []string{
-			"File already exists",
-			"",
-			fmt.Sprintf("  File:     %s", pending.Filename),
-			fmt.Sprintf("  Path:     %s", pending.Path),
-			fmt.Sprintf("  Current:  %s", humanBytes(pending.ExistingBytes)),
-		}
-		if pending.RemoteBytes > 0 {
-			lines = append(lines,
-				fmt.Sprintf("  Remote:   %s", humanBytes(pending.RemoteBytes)),
-				fmt.Sprintf("  Diff:     %s", formatByteDiff(pending.ExistingBytes, pending.RemoteBytes)),
-			)
-		}
-		lines = append(lines, "", mutedStyle.Render("y/Enter=download again  n/Esc=cancel"))
-		return strings.Join(lines, "\n")
-	case modeShowURL:
-		return strings.Join([]string{"Direct URL", "", m.showURL, "", mutedStyle.Render("Enter/Esc to close")}, "\n")
-	case modeDelete:
-		if len(m.deleteIDs) > 1 {
-			return strings.Join([]string{
-				fmt.Sprintf("Delete %d torrent(s)?", len(m.deleteIDs)),
-				"",
-				mutedStyle.Render("y/Enter=delete  n/Esc=cancel"),
-			}, "\n")
-		}
-		name := ""
-		if len(m.deleteIDs) > 0 {
-			name = m.deleteIDs[0]
-		}
-		if m.detail != nil && m.detail.ID == name {
-			name = m.detail.Filename
-		}
-		return strings.Join([]string{fmt.Sprintf("Delete torrent '%s'?", name), "", mutedStyle.Render("y/Enter=delete  n/Esc=cancel")}, "\n")
-	}
-	return ""
 }
 
 func renderSearchBar(m Model) string {
@@ -781,39 +678,4 @@ func max64(values ...int64) int64 {
 	return out
 }
 
-func renderFileBrowserPopup(m Model) string {
-	width := m.width
-	height := m.height
-	if width <= 0 {
-		width = 80
-	}
-	if height <= 0 {
-		height = 24
-	}
 
-	debug.Log("renderFileBrowserPopup: term=%dx%d mode=%s returnMode=%s", width, height, m.mode, m.returnMode)
-	debug.Log("renderFileBrowserPopup: browser.CurrentDir=%s entries=%d cursor=%d selected=%d visual=%v",
-		m.browser.CurrentDir, len(m.browser.Entries), m.browser.Cursor, len(m.browser.Selected), m.browser.VisualMode)
-
-	popupW := max(40, width*7/10)
-	popupH := max(10, height/2)
-	innerW := popupW - 4
-	innerH := popupH - 2
-
-	debug.Log("renderFileBrowserPopup: popup=%dx%d inner=%dx%d", popupW, popupH, innerW, innerH)
-
-	title := headStyle.Render(" Import: " + m.browser.CurrentDir + " ")
-	content := m.browser.view(innerW, innerH)
-	if m.errText != "" {
-		content += "\n" + errorStyle.Render(m.errText)
-	}
-	popupBox := boxStyle.Width(innerW).Render(title + "\n" + content)
-
-	debug.Log("renderFileBrowserPopup: popupBox lines=%d", len(strings.Split(popupBox, "\n")))
-
-	result := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, popupBox)
-
-	debug.Log("renderFileBrowserPopup: result len=%d", len(result))
-
-	return result
-}

@@ -127,6 +127,7 @@ type Model struct {
 	download          *models.ManagedDownload
 	downloadTorrentID string
 	deleteIDs         []string
+	flash             flashState
 }
 
 type pendingDownloadState struct {
@@ -341,6 +342,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
 
+	case flashTimeoutMsg:
+		m.clearFlash()
+		return m, nil
+
 	case torrentsMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -415,9 +420,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode = m.returnMode
-		m.status = "Updated torrent file selection"
 		m.errText = ""
-		return m, refreshCmd(m.service)
+		return m, tea.Batch(refreshCmd(m.service), m.setFlash(flashSuccess, "Updated torrent file selection"))
 
 	case deleteMsg:
 		m.loading = false
@@ -429,10 +433,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.downloadTorrentID = ""
 		}
 		m.mode = modeMain
-		m.status = "Deleted torrent"
 		m.errText = ""
 		m.deleteIDs = nil
-		return m, refreshCmd(m.service)
+		return m, tea.Batch(refreshCmd(m.service), m.setFlash(flashSuccess, "Deleted torrent"))
 
 	case batchResultMsg:
 		m.loading = false
@@ -443,10 +446,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.mode = modeMain
+			var flashMsg string
 			if msg.failed > 0 {
-				m.status = fmt.Sprintf("Deleted %d/%d torrent(s)", msg.success, msg.total)
+				flashMsg = fmt.Sprintf("Deleted %d/%d torrent(s)", msg.success, msg.total)
 			} else {
-				m.status = fmt.Sprintf("Deleted %d torrent(s)", msg.success)
+				flashMsg = fmt.Sprintf("Deleted %d torrent(s)", msg.success)
 			}
 			if msg.detail != "" {
 				m.errText = strings.TrimSpace(msg.detail)
@@ -456,7 +460,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleteIDs = nil
 			m.clearBatchSelection()
 			m.batchMode = false
-			return m, refreshCmd(m.service)
+			return m, tea.Batch(refreshCmd(m.service), m.setFlash(flashSuccess, flashMsg))
 		case batchOpCopy:
 			if msg.err != nil {
 				m.errText = msg.err.Error()
@@ -473,7 +477,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.failed > 0 {
 				parts = append(parts, fmt.Sprintf("%d failed", msg.failed))
 			}
-			m.status = strings.Join(parts, ", ")
+			flashMsg := strings.Join(parts, ", ")
 			if msg.detail != "" {
 				m.errText = strings.TrimSpace(msg.detail)
 			} else {
@@ -481,7 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clearBatchSelection()
 			m.batchMode = false
-			return m, nil
+			return m, m.setFlash(flashSuccess, flashMsg)
 		}
 
 	case handoffMsg:
@@ -492,13 +496,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showURL = msg.result.URL
 		m.mode = modeShowURL
-		if msg.result.Copied {
-			m.status = "Direct URL copied to clipboard"
-		} else {
-			m.status = "Direct URL ready"
-		}
 		m.errText = ""
-		return m, nil
+		flashMsg := "Direct URL ready"
+		if msg.result.Copied {
+			flashMsg = "Direct URL copied to clipboard"
+		}
+		return m, m.setFlash(flashSuccess, flashMsg)
 
 	case managedDownloadMsg:
 		m.loading = false
@@ -586,7 +589,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		prevMode := m.mode
+		model, cmd := m.handleKey(msg)
+		if mm, ok := model.(Model); ok && mm.mode != prevMode {
+			mm.clearFlash()
+			return mm, cmd
+		}
+		return model, cmd
 	}
 
 	var cmd tea.Cmd
@@ -943,6 +952,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case " ":
 			m.selector.toggleCurrent()
+		case "ctrl+a":
+			for _, file := range m.selector.Files {
+				m.selector.Selected[file.ID] = true
+			}
+		case "ctrl+d":
+			m.selector.Selected = map[int]bool{}
 		case "enter":
 			ids := m.selector.selectedIDs()
 			if len(ids) == 0 {
