@@ -18,6 +18,10 @@ The application SHALL resolve the selected Real-Debrid target to a direct downlo
 - **WHEN** the user chooses a downloadable target from a torrent whose status is `downloaded` and confirms the managed download action
 - **THEN** the application resolves the direct URL and submits it to the managed aria2 session as a local download
 
+#### Scenario: Existing local file requires confirmation
+- **WHEN** the resolved filename already exists in the configured download directory
+- **THEN** the application asks whether to download again and shows the current local size plus the size difference when the remote filesize is known
+
 #### Scenario: Active managed session is reopened
 - **WHEN** a managed download is already active and the user requests another managed download
 - **THEN** the application reopens the active managed download session instead of starting a second one

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -164,17 +165,37 @@ func TestPadVisual(t *testing.T) {
 }
 
 func TestFootersMentionManagedDownload(t *testing.T) {
-	if got := listFooter(Model{}); !strings.Contains(got, "d download") {
+	if got := ansi.Strip(listFooter(Model{})); !strings.Contains(got, "d download") {
 		t.Fatalf("listFooter() = %q, want managed download hint", got)
 	}
-	if got := detailFooter(); !strings.Contains(got, "d=download") {
+	if got := ansi.Strip(detailFooter()); !strings.Contains(got, "d download") {
 		t.Fatalf("detailFooter() = %q, want managed download hint", got)
 	}
 }
 
 func TestDownloadFooterMentionsTorrentDeleteWhenAvailable(t *testing.T) {
-	got := downloadFooter(&models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}, true)
-	if !strings.Contains(got, "x=delete torrent") {
+	got := ansi.Strip(downloadFooter(&models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}, true))
+	if !strings.Contains(got, "x delete torrent") {
 		t.Fatalf("downloadFooter() = %q, want delete torrent hint", got)
+	}
+}
+
+func TestOverwriteModalShowsByteDiff(t *testing.T) {
+	m := Model{
+		mode: modeOverwrite,
+		pendingDownload: &pendingDownloadState{
+			Filename:      "movie.mkv",
+			Path:          "/tmp/movie.mkv",
+			ExistingBytes: 1024,
+			RemoteBytes:   2048,
+		},
+	}
+
+	got := ansi.Strip(renderModal(m))
+	if !strings.Contains(got, "Diff:") {
+		t.Fatalf("renderModal() = %q, want diff line", got)
+	}
+	if !strings.Contains(got, "smaller than remote") {
+		t.Fatalf("renderModal() = %q, want size comparison", got)
 	}
 }

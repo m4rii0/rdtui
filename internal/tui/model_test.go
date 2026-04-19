@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -343,6 +345,70 @@ func TestManagedDownloadMsgEntersDownloadMode(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected polling command after entering download mode")
+	}
+}
+
+func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(path, []byte("old-data"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+
+	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no start command before overwrite confirmation")
+	}
+	if m.mode != modeOverwrite {
+		t.Fatalf("mode = %q, want modeOverwrite", m.mode)
+	}
+	if m.pendingDownload == nil {
+		t.Fatal("expected pending download state")
+	}
+	if m.pendingDownload.ExistingBytes != 8 {
+		t.Fatalf("ExistingBytes = %d, want 8", m.pendingDownload.ExistingBytes)
+	}
+	if m.pendingDownload.RemoteBytes != 100 {
+		t.Fatalf("RemoteBytes = %d, want 100", m.pendingDownload.RemoteBytes)
+	}
+}
+
+func TestResolvedDownloadStartsImmediatelyWhenFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+
+	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected start command when file missing")
+	}
+	if m.pendingDownload != nil {
+		t.Fatal("pending download should be cleared")
+	}
+	if !m.loading {
+		t.Fatal("expected loading while starting download")
+	}
+}
+
+func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
+	m := Model{
+		mode:       modeOverwrite,
+		returnMode: modeDetail,
+		pendingDownload: &pendingDownloadState{
+			Filename: "movie.mkv",
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail", m.mode)
+	}
+	if m.pendingDownload != nil {
+		t.Fatal("pending download should be cleared")
 	}
 }
 

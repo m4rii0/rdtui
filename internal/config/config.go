@@ -88,7 +88,7 @@ func (s *Store) LoadConfig() (Config, error) {
 	switch models.DownloadBackend(cfg.DownloadBackend) {
 	case models.DownloadBackendAria2, models.DownloadBackendDirect:
 	default:
-		cfg.DownloadBackend = string(models.DownloadBackendAria2)
+		cfg.DownloadBackend = string(models.DownloadBackendDirect)
 	}
 
 	return cfg, nil

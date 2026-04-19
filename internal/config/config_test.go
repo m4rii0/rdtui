@@ -29,8 +29,8 @@ func TestLoadConfigIgnoresLegacyExternalCommand(t *testing.T) {
 	if cfg.Aria2BinaryPath != "/usr/bin/aria2c" {
 		t.Fatalf("Aria2BinaryPath = %q", cfg.Aria2BinaryPath)
 	}
-	if cfg.DownloadBackend != "aria2" {
-		t.Fatalf("DownloadBackend = %q, want aria2", cfg.DownloadBackend)
+	if cfg.DownloadBackend != "direct" {
+		t.Fatalf("DownloadBackend = %q, want direct", cfg.DownloadBackend)
 	}
 }
 

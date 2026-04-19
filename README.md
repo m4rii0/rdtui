@@ -84,13 +84,13 @@ Example:
 
 - `private_token` is optional. If present, it is used before stored device-auth credentials.
 - `default_download_dir` controls where local downloads are saved. If omitted, it defaults to `~/Downloads`.
-- `download_backend` supports `aria2` or `direct`. If omitted or invalid, it defaults to `aria2`.
+- `download_backend` supports `aria2` or `direct`. If omitted or invalid, it defaults to `direct`.
 - `aria2c_path` is optional and only used when `download_backend` is `aria2`. Leave it empty to use `aria2c` from `PATH`.
 - Older `external_command` entries are ignored by the managed download flow and will disappear the next time `rdtui` saves config.
 
 Behavior summary:
-- `download_backend = "aria2"`: `rdtui` starts its own loopback-only `aria2c` RPC session and monitors that download in the TUI.
 - `download_backend = "direct"`: `rdtui` downloads the resolved URL with its built-in HTTP downloader and does not require `aria2c`.
+- `download_backend = "aria2"`: `rdtui` starts its own loopback-only `aria2c` RPC session and monitors that download in the TUI.
 
 ### `auth.json`
 
@@ -115,6 +115,8 @@ Key bindings:
 ### Managed Download
 
 Press `d` on a ready torrent to resolve the selected target and start a managed local download. `rdtui` shows a dedicated progress screen and lets you refresh progress, open the completed file, reveal it in its directory, or delete the source torrent once the download has completed.
+
+If target file already exists in `default_download_dir`, `rdtui` pauses first and asks whether you want to download it again, showing current local size and size difference when remote size is known.
 
 When `download_backend` is `aria2`, `rdtui` starts its own loopback-only `aria2c` RPC session for the download.
 

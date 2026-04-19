@@ -16,6 +16,9 @@ var (
 	appStyle               = lipgloss.NewStyle().Padding(1, 2)
 	headStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	mutedStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	footerKeyStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+	footerDescStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	footerSepStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	errorStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
 	okStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	boxStyle               = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
@@ -188,7 +191,7 @@ func renderMain(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, listFooter(m))
+	lines = append(lines, truncateLine(listFooter(m), innerWidth))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -252,7 +255,7 @@ func renderDetailView(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, detailFooter())
+	lines = append(lines, truncateLine(detailFooter(), innerWidth))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -311,7 +314,7 @@ func renderDownloadView(m Model) string {
 	if modal := renderModal(m); modal != "" {
 		lines = append(lines, "", boxStyle.Render(modal))
 	}
-	lines = append(lines, downloadFooter(m.download, m.downloadTorrentID != ""))
+	lines = append(lines, truncateLine(downloadFooter(m.download, m.downloadTorrentID != ""), innerWidth))
 	if m.loading {
 		lines = append(lines, mutedStyle.Render("Working..."))
 	}
@@ -419,6 +422,26 @@ func renderModal(m Model) string {
 		}
 		lines = append(lines, "", mutedStyle.Render("Enter=confirm  Esc=cancel"))
 		return strings.Join(lines, "\n")
+	case modeOverwrite:
+		if m.pendingDownload == nil {
+			return ""
+		}
+		pending := m.pendingDownload
+		lines := []string{
+			"File already exists",
+			"",
+			fmt.Sprintf("  File:     %s", pending.Filename),
+			fmt.Sprintf("  Path:     %s", pending.Path),
+			fmt.Sprintf("  Current:  %s", humanBytes(pending.ExistingBytes)),
+		}
+		if pending.RemoteBytes > 0 {
+			lines = append(lines,
+				fmt.Sprintf("  Remote:   %s", humanBytes(pending.RemoteBytes)),
+				fmt.Sprintf("  Diff:     %s", formatByteDiff(pending.ExistingBytes, pending.RemoteBytes)),
+			)
+		}
+		lines = append(lines, "", mutedStyle.Render("y/Enter=download again  n/Esc=cancel"))
+		return strings.Join(lines, "\n")
 	case modeShowURL:
 		return strings.Join([]string{"Direct URL", "", m.showURL, "", mutedStyle.Render("Enter/Esc to close")}, "\n")
 	case modeDelete:
@@ -452,28 +475,82 @@ func renderSearchBar(m Model) string {
 
 func listFooter(m Model) string {
 	if m.mode == modeSearch {
-		return mutedStyle.Render("esc=clear  enter=keep  ↑↓ navigate  type to filter")
+		return renderFooterShortcuts(
+			shortcutHint{Key: "esc", Desc: "clear"},
+			shortcutHint{Key: "enter", Desc: "keep"},
+			shortcutHint{Key: "↑↓", Desc: "navigate"},
+			shortcutHint{Key: "type", Desc: "filter"},
+		)
 	}
 	if m.batchMode {
-		return mutedStyle.Render(fmt.Sprintf("[BATCH] space=mark  ctrl+a=all  ctrl+d=clear  x=delete  y=copy  b/esc=exit  │  Marked: %d", len(m.batchSelected)))
+		return renderFooterShortcuts(
+			shortcutHint{Key: "space", Desc: "mark"},
+			shortcutHint{Key: "ctrl+a", Desc: "all"},
+			shortcutHint{Key: "ctrl+d", Desc: "clear"},
+			shortcutHint{Key: "x", Desc: "delete"},
+			shortcutHint{Key: "y", Desc: "copy"},
+			shortcutHint{Key: "b/esc", Desc: "exit"},
+		) + footerSepStyle.Render("  |  ") + footerDescStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
 	}
-	return mutedStyle.Render("↑↓ j/k enter S/P/Z/D/N=sort /search r=refresh m magnet u url i import b batch s select y copy d download x delete q")
+	return renderFooterShortcuts(
+		shortcutHint{Key: "↑↓ j/k", Desc: "move"},
+		shortcutHint{Key: "enter", Desc: "details"},
+		shortcutHint{Key: "S/P/Z/D/N", Desc: "sort"},
+		shortcutHint{Key: "/", Desc: "search"},
+		shortcutHint{Key: "r", Desc: "refresh"},
+		shortcutHint{Key: "m", Desc: "magnet"},
+		shortcutHint{Key: "u", Desc: "url"},
+		shortcutHint{Key: "i", Desc: "import"},
+		shortcutHint{Key: "b", Desc: "batch"},
+		shortcutHint{Key: "s", Desc: "select"},
+		shortcutHint{Key: "y", Desc: "copy"},
+		shortcutHint{Key: "d", Desc: "download"},
+		shortcutHint{Key: "x", Desc: "delete"},
+		shortcutHint{Key: "q", Desc: "quit"},
+	)
 }
 
 func detailFooter() string {
-	return mutedStyle.Render("esc=back  s=select  y=copy  d=download  x=delete  r=refresh")
+	return renderFooterShortcuts(
+		shortcutHint{Key: "esc", Desc: "back"},
+		shortcutHint{Key: "s", Desc: "select"},
+		shortcutHint{Key: "y", Desc: "copy"},
+		shortcutHint{Key: "d", Desc: "download"},
+		shortcutHint{Key: "x", Desc: "delete"},
+		shortcutHint{Key: "r", Desc: "refresh"},
+	)
 }
 
 func downloadFooter(download *models.ManagedDownload, canDeleteTorrent bool) string {
 	if download != nil && download.IsComplete() {
-		footer := "esc=back  o=open  s=reveal"
+		items := []shortcutHint{{Key: "esc", Desc: "back"}, {Key: "o", Desc: "open"}, {Key: "s", Desc: "reveal"}}
 		if canDeleteTorrent {
-			footer += "  x=delete torrent"
+			items = append(items, shortcutHint{Key: "x", Desc: "delete torrent"})
 		}
-		footer += "  r=refresh"
-		return mutedStyle.Render(footer)
+		items = append(items, shortcutHint{Key: "r", Desc: "refresh"})
+		return renderFooterShortcuts(items...)
 	}
-	return mutedStyle.Render("esc=back  r=refresh")
+	return renderFooterShortcuts(
+		shortcutHint{Key: "esc", Desc: "back"},
+		shortcutHint{Key: "r", Desc: "refresh"},
+	)
+}
+
+type shortcutHint struct {
+	Key  string
+	Desc string
+}
+
+func renderFooterShortcuts(items ...shortcutHint) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		part := footerKeyStyle.Render(item.Key)
+		if item.Desc != "" {
+			part += " " + footerDescStyle.Render(item.Desc)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, footerSepStyle.Render("  ·  "))
 }
 
 func statusLabel(status string) string {
@@ -556,6 +633,17 @@ func humanBytes(bytes int64) string {
 		return fmt.Sprintf("%d %s", bytes, units[unit])
 	}
 	return fmt.Sprintf("%.1f %s", value, units[unit])
+}
+
+func formatByteDiff(current int64, remote int64) string {
+	diff := remote - current
+	if diff == 0 {
+		return "same size"
+	}
+	if diff > 0 {
+		return humanBytes(diff) + " smaller than remote"
+	}
+	return humanBytes(-diff) + " larger than remote"
 }
 
 func formatAddedTime(value time.Time) string {

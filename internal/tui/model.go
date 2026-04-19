@@ -36,6 +36,7 @@ const (
 	modeFileBrowser  mode = "file-browser"
 	modeSelectFiles  mode = "select-files"
 	modeChooseTarget mode = "choose-target"
+	modeOverwrite    mode = "overwrite"
 	modeShowURL      mode = "show-url"
 	modeDownload     mode = "download"
 	modeSearch       mode = "search"
@@ -89,15 +90,16 @@ type targetPickerState struct {
 type Model struct {
 	service *app.Service
 
-	version    string
-	mode       mode
-	returnMode mode
-	width      int
-	height     int
-	loading    bool
-	status     string
-	errText    string
-	session    *models.AuthSession
+	version     string
+	mode        mode
+	returnMode  mode
+	downloadDir string
+	width       int
+	height      int
+	loading     bool
+	status      string
+	errText     string
+	session     *models.AuthSession
 
 	torrents         []models.Torrent
 	filteredTorrents []models.Torrent
@@ -120,10 +122,19 @@ type Model struct {
 	browser           fileBrowserState
 	selector          selectFilesState
 	targets           targetPickerState
+	pendingDownload   *pendingDownloadState
 	showURL           string
 	download          *models.ManagedDownload
 	downloadTorrentID string
 	deleteIDs         []string
+}
+
+type pendingDownloadState struct {
+	URL           string
+	Filename      string
+	Path          string
+	RemoteBytes   int64
+	ExistingBytes int64
 }
 
 type bootstrapMsg struct {
@@ -185,6 +196,13 @@ type managedDownloadMsg struct {
 	err    error
 }
 
+type resolvedDownloadMsg struct {
+	url      string
+	filename string
+	filesize int64
+	err      error
+}
+
 type managedDownloadStatusMsg struct {
 	download models.ManagedDownload
 	ok       bool
@@ -215,6 +233,7 @@ func NewModel(service *app.Service) Model {
 		version:       version.Version,
 		mode:          modeStarting,
 		returnMode:    modeMain,
+		downloadDir:   modelDownloadDir(service),
 		input:         ti,
 		searchInput:   si,
 		sortColumn:    colAdded,
@@ -500,6 +519,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
+
+	case resolvedDownloadMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		path := filepath.Join(m.downloadDir, msg.filename)
+		existingBytes, exists, err := existingFileSize(path)
+		if err != nil {
+			m.errText = err.Error()
+			return m, nil
+		}
+		if exists {
+			m.pendingDownload = &pendingDownloadState{
+				URL:           msg.url,
+				Filename:      msg.filename,
+				Path:          path,
+				RemoteBytes:   msg.filesize,
+				ExistingBytes: existingBytes,
+			}
+			m.mode = modeOverwrite
+			m.errText = ""
+			m.status = "Existing file found"
+			return m, nil
+		}
+		return m.startPendingDownload(msg.url, msg.filename)
 
 	case managedDownloadStatusMsg:
 		m.loading = false
@@ -929,7 +975,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.downloadTorrentID = m.detail.ID
 			}
 			m.loading = true
-			return m, targetActionCmd(m.service, m.targets.Items[m.targets.Cursor], m.targets.Action)
+			if m.targets.Action == handoffDownload {
+				return m, resolveDownloadCmd(m.service, m.targets.Items[m.targets.Cursor])
+			}
+			return m, handoffCmd(m.service, m.targets.Items[m.targets.Cursor])
+		}
+		return m, nil
+
+	case modeOverwrite:
+		switch msg.String() {
+		case "esc", "n":
+			m.mode = m.returnMode
+			m.pendingDownload = nil
+			m.status = "Download cancelled"
+			m.errText = ""
+			return m, nil
+		case "y", "enter":
+			if m.pendingDownload == nil {
+				m.mode = m.returnMode
+				return m, nil
+			}
+			return m.startPendingDownload(m.pendingDownload.URL, m.pendingDownload.Filename)
 		}
 		return m, nil
 
@@ -1305,13 +1371,10 @@ func executeBatchCopy(service *app.Service, ids []string, torrents []models.Torr
 	return result
 }
 
-func targetActionCmd(service *app.Service, target models.DownloadTarget, action handoffAction) tea.Cmd {
+func handoffCmd(service *app.Service, target models.DownloadTarget) tea.Cmd {
 	return func() tea.Msg {
 		unrestricted, err := service.ResolveDirectURL(context.Background(), target)
 		if err != nil {
-			if action == handoffDownload {
-				return managedDownloadMsg{err: err}
-			}
 			return handoffMsg{err: err}
 		}
 		url := unrestricted.Download
@@ -1322,12 +1385,33 @@ func targetActionCmd(service *app.Service, target models.DownloadTarget, action 
 		if filename == "" {
 			filename = target.Label
 		}
-		if action == handoffDownload {
-			result, err := service.StartManagedDownload(context.Background(), url, filename)
-			return managedDownloadMsg{result: result, err: err}
-		}
 		copied, err := service.CopyURL(url)
 		return handoffMsg{result: models.HandoffResult{URL: url, Copied: copied}, err: err}
+	}
+}
+
+func resolveDownloadCmd(service *app.Service, target models.DownloadTarget) tea.Cmd {
+	return func() tea.Msg {
+		unrestricted, err := service.ResolveDirectURL(context.Background(), target)
+		if err != nil {
+			return resolvedDownloadMsg{err: err}
+		}
+		url := unrestricted.Download
+		if url == "" {
+			url = unrestricted.Link
+		}
+		filename := unrestricted.Filename
+		if filename == "" {
+			filename = target.Label
+		}
+		return resolvedDownloadMsg{url: url, filename: filename, filesize: unrestricted.Filesize}
+	}
+}
+
+func startManagedDownloadCmd(service *app.Service, url string, filename string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := service.StartManagedDownload(context.Background(), url, filename)
+		return managedDownloadMsg{result: result, err: err}
 	}
 }
 
@@ -1379,6 +1463,35 @@ func fallbackModeForInput(action inputAction) mode {
 		return modeAuthChoice
 	}
 	return modeMain
+}
+
+func modelDownloadDir(service *app.Service) string {
+	if service != nil {
+		if dir := service.Config().DefaultDownloadDir; dir != "" {
+			return dir
+		}
+	}
+	return filepath.Join(userHomeDir(), "Downloads")
+}
+
+func (m *Model) startPendingDownload(url string, filename string) (tea.Model, tea.Cmd) {
+	m.pendingDownload = nil
+	m.loading = true
+	return *m, startManagedDownloadCmd(m.service, url, filename)
+}
+
+func existingFileSize(path string) (int64, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	if info.IsDir() {
+		return 0, false, fmt.Errorf("download target is directory: %s", path)
+	}
+	return info.Size(), true, nil
 }
 
 func userHomeDir() string {
