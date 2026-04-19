@@ -6,7 +6,7 @@ import "charm.land/lipgloss/v2"
 
 const (
 	colorNeon    = lipgloss.ANSIColor(213) // #ff87ff  — primary accent / headers
-	colorCyan    = lipgloss.ANSIColor(87)  // #5fffff  — active, info, search
+	colorViolet  = lipgloss.ANSIColor(141) // #af87ff  — active, info, search
 	colorAmber   = lipgloss.ANSIColor(220) // #ffdf00  — warnings, highlights
 	colorGreen   = lipgloss.ANSIColor(42)  // #00d75f  — success, downloaded
 	colorRed     = lipgloss.ANSIColor(203) // #ff5f5f  — errors, danger
@@ -25,7 +25,7 @@ var (
 	// Header / title
 	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
 	versionStyle = lipgloss.NewStyle().Foreground(colorMuted)
-	userStyle   = lipgloss.NewStyle().Foreground(colorCyan)
+	userStyle   = lipgloss.NewStyle().Foreground(colorViolet)
 
 	// Body text
 	textStyle  = lipgloss.NewStyle().Foreground(colorText)
@@ -36,7 +36,7 @@ var (
 	errorStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	okStyle    = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 	warnStyle  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	infoStyle  = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+	infoStyle  = lipgloss.NewStyle().Foreground(colorViolet).Bold(true)
 
 	// Table rows
 	selectedStyle     = lipgloss.NewStyle().Foreground(colorAmber).Background(colorPurplBg).Bold(true)
@@ -47,12 +47,12 @@ var (
 
 	// Status labels
 	statusDownloadedStyle  = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
-	statusDownloadingStyle = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+	statusDownloadingStyle = lipgloss.NewStyle().Foreground(colorViolet).Bold(true)
 	statusWaitingStyle     = lipgloss.NewStyle().Foreground(colorAmber)
 	statusErrorStyle       = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 
 	// Search
-	searchStyle         = lipgloss.NewStyle().Foreground(colorCyan)
+	searchStyle         = lipgloss.NewStyle().Foreground(colorViolet)
 	matchHighlightStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAmber).Underline(true)
 
 	// Footer
@@ -69,13 +69,13 @@ var (
 
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorCyan).
+			BorderForeground(colorViolet).
 			Padding(0, 1)
 
 	// Popup styles
 	popupBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorCyan).
+			BorderForeground(colorViolet).
 			Padding(0, 1)
 
 	dangerStyle = lipgloss.NewStyle().

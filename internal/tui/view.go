@@ -313,12 +313,12 @@ func renderTorrentList(m Model, width, height int) string {
 		if showScrollbar {
 			rowStr = truncateLine(rowStr, max(1, width-2)) + " " + mutedStyle.Render(scrollbarGlyph(row, thumbTop, thumbSize))
 		}
-		if idx == m.selectedIdx {
-			rowStr = truncateLine(rowStr, width)
-		} else if m.batchMode && m.batchSelected[t.ID] {
-			rowStr = batchMarkedStyle.Width(width).Render(truncateLine(rowStr, width))
-		} else if row%2 == 1 {
-			rowStr = altRowStyle.Width(width).Render(truncateLine(rowStr, width))
+		if idx == m.selectedIdx || (m.batchMode && m.batchSelected[t.ID]) {
+			if m.batchMode && m.batchSelected[t.ID] {
+				rowStr = batchMarkedStyle.Width(width).Render(truncateLine(rowStr, width))
+			} else {
+				rowStr = truncateLine(rowStr, width)
+			}
 		} else {
 			rowStr = truncateLine(rowStr, width)
 		}
