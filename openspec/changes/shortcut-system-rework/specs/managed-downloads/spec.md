@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Managed download progress is visible in the TUI
-The application SHALL provide a dedicated download view that shows the active managed download's filename, status, progress, transferred bytes, total bytes, speed, ETA when available, and completion or failure state. The download view's footer and full help SHALL be generated from the currently available download-view actions.
+The application SHALL provide a dedicated download view that shows the active managed download's filename, status, progress, transferred bytes, total bytes, speed, ETA when available, and completion or failure state. The download view's footer and full help SHALL be generated from the current download-view actions. Completion-only actions SHALL remain visible in a dimmed style while the download is still active, and switch to active when the download completes.
 
 #### Scenario: Download is in progress
 - **WHEN** aria2 reports the active managed download as `active`, `waiting`, or `paused`
@@ -17,7 +17,7 @@ The application SHALL provide a dedicated download view that shows the active ma
 
 #### Scenario: Download view hides completion-only actions while active
 - **WHEN** aria2 reports the active managed download as `active`, `waiting`, or `paused`
-- **THEN** the footer and full-help overlay show only the shortcuts valid for an in-progress download view
+- **THEN** the footer and full-help overlay keep completion-only actions visible in a dimmed style
 
 #### Scenario: Download completion exposes follow-up actions
 - **WHEN** aria2 reports the active managed download as `complete`
@@ -26,7 +26,7 @@ The application SHALL provide a dedicated download view that shows the active ma
 ## ADDED Requirements
 
 ### Requirement: Full shortcut help overlay is available for the managed download view
-The application SHALL provide a contextual full-help overlay opened with `?` in the managed download view. The overlay SHALL list all currently available shortcuts for that download state and SHALL hide actions that are not currently valid.
+The application SHALL provide a contextual full-help overlay opened with `?` in the managed download view. The overlay SHALL list the current download-view shortcuts and SHALL render completion-only actions dimmed until they become valid.
 
 #### Scenario: User opens full help during an active download
 - **WHEN** the user presses `?` in the managed download view while a download is in progress

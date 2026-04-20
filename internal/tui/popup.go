@@ -85,6 +85,10 @@ func popupFooter(shortcuts ...shortcutHint) string {
 	return mutedStyle.Render(renderFooterShortcuts(shortcuts...))
 }
 
+func popupShortcutFooter(m Model) string {
+	return mutedStyle.Render(renderShortcutFooter(m.renderShortcutDefs(), m))
+}
+
 func popupSize(termW, termH int) (int, int) {
 	w := max(40, termW*7/10)
 	h := max(10, termH/2)
@@ -197,13 +201,7 @@ func renderSelectFilesPopup(m Model) string {
 	}
 
 	content := strings.Join(lines, "\n")
-	content += "\n\n" + popupFooter(
-		shortcutHint{Key: "space", Desc: "toggle"},
-		shortcutHint{Key: "ctrl+a", Desc: "all"},
-		shortcutHint{Key: "ctrl+d", Desc: "clear"},
-		shortcutHint{Key: "enter", Desc: "confirm"},
-		shortcutHint{Key: "esc", Desc: "cancel"},
-	)
+	content += "\n\n" + popupShortcutFooter(m)
 	return popupBox(title, content, innerW, false)
 }
 
@@ -234,12 +232,7 @@ func renderDeletePopup(m Model) string {
 			lines = append(lines, "  "+mutedStyle.Render("▸ ")+truncateLine(name, innerW-4))
 			count++
 		}
-		lines = append(lines, "",
-			popupFooter(
-				shortcutHint{Key: "y/enter", Desc: "delete"},
-				shortcutHint{Key: "n/esc", Desc: "cancel"},
-			),
-		)
+		lines = append(lines, "", popupShortcutFooter(m))
 		body = strings.Join(lines, "\n")
 	} else {
 		id := ""
@@ -262,10 +255,7 @@ func renderDeletePopup(m Model) string {
 			"",
 			"  " + mutedStyle.Render("▸ ") + truncateLine(name, innerW-4),
 			"",
-			popupFooter(
-				shortcutHint{Key: "y/enter", Desc: "delete"},
-				shortcutHint{Key: "n/esc", Desc: "cancel"},
-			),
+			popupShortcutFooter(m),
 		}, "\n")
 	}
 	return popupBox(title, body, innerW, true)
@@ -293,13 +283,7 @@ func renderTargetPickerPopup(m Model) string {
 		}
 		lines = append(lines, prefix+truncateLine(label, innerW-4))
 	}
-	lines = append(lines, "",
-		popupFooter(
-			shortcutHint{Key: "↑↓", Desc: "navigate"},
-			shortcutHint{Key: "enter", Desc: "confirm"},
-			shortcutHint{Key: "esc", Desc: "cancel"},
-		),
-	)
+	lines = append(lines, "", popupShortcutFooter(m))
 	return popupBox(title, strings.Join(lines, "\n"), innerW, false)
 }
 
@@ -323,12 +307,7 @@ func renderOverwritePopup(m Model) string {
 			fmt.Sprintf("  %s  %s", mutedStyle.Render("Diff:    "), warnStyle.Render(formatByteDiff(pending.ExistingBytes, pending.RemoteBytes))),
 		)
 	}
-	lines = append(lines, "",
-		popupFooter(
-			shortcutHint{Key: "y/enter", Desc: "download again"},
-			shortcutHint{Key: "n/esc", Desc: "cancel"},
-		),
-	)
+	lines = append(lines, "", popupShortcutFooter(m))
 	return popupBox(title, strings.Join(lines, "\n"), innerW, false)
 }
 
@@ -340,9 +319,7 @@ func renderShowURLPopup(m Model) string {
 	content := strings.Join([]string{
 		infoStyle.Render(truncateLine(m.showURL, innerW)),
 		"",
-		popupFooter(
-			shortcutHint{Key: "enter/esc", Desc: "close"},
-		),
+		popupShortcutFooter(m),
 	}, "\n")
 	return popupBox(title, content, innerW, false)
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -297,6 +298,10 @@ func TestDownloadFromMainViewOpensTargetPicker(t *testing.T) {
 	m := Model{
 		mode:       modeMain,
 		returnMode: modeMain,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "movie", Status: "downloaded", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
 		detail: &models.TorrentInfo{
 			Torrent: models.Torrent{ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"}},
 			Files:   []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
@@ -629,5 +634,97 @@ func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
 	}
 	if ids[0] != "a" || ids[1] != "b" {
 		t.Fatalf("ids = %v, want [a b] (torrent list order)", ids)
+	}
+}
+
+func TestMainDownloadFetchesDetailWhenSelectionIsReady(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		returnMode:    modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{{
+			ID:       "a",
+			Filename: "movie",
+			Status:   "downloaded",
+			Added:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		}},
+		selectedIdx: 0,
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected detail fetch command for ready selection without cached detail")
+	}
+	if m.pendingAction == nil || m.pendingAction.action != actionStartDownload {
+		t.Fatalf("pendingAction = %+v, want start-download", m.pendingAction)
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain while waiting for detail", m.mode)
+	}
+}
+
+func TestHelpOverlayTogglesWithoutChangingContext(t *testing.T) {
+	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
+	m = updated.(Model)
+	if !m.helpVisible {
+		t.Fatal("expected help overlay open after ?")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain", m.mode)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.helpVisible {
+		t.Fatal("expected help overlay closed after esc")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain after closing help", m.mode)
+	}
+}
+
+func TestBrowserEditingQuestionMarkStaysInInput(t *testing.T) {
+	b := newFileBrowser(".")
+	b.startEditing()
+	m := Model{mode: modeFileBrowser, browser: b}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
+	m = updated.(Model)
+	if m.helpVisible {
+		t.Fatal("help overlay should not open while browser path input is focused")
+	}
+	if !strings.Contains(m.browser.pathInput.Value(), "?") {
+		t.Fatalf("path input value = %q, want to contain ?", m.browser.pathInput.Value())
+	}
+}
+
+func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{{
+			ID:       "a",
+			Filename: "movie",
+			Status:   "queued",
+			Added:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		}},
+		selectedIdx: 0,
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command when download action is unavailable")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain", m.mode)
+	}
+	if m.errText != "Selected torrent is not ready to download" {
+		t.Fatalf("errText = %q, want inline unavailable-action error", m.errText)
 	}
 }

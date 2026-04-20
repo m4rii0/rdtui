@@ -131,6 +131,8 @@ type Model struct {
 	download          *models.ManagedDownload
 	downloadTorrentID string
 	deleteIDs         []string
+	helpVisible       bool
+	pendingAction     *pendingShortcutAction
 	flash             flashState
 }
 
@@ -382,14 +384,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailMsg:
 		if msg.err != nil {
+			m.clearPendingDetailAction(msg.id)
 			m.errText = msg.err.Error()
 			return m, nil
 		}
 		if msg.id != m.selectedTorrentID() {
+			m.clearPendingDetailAction(msg.id)
 			return m, nil
 		}
 		m.detail = &msg.info
 		m.errText = ""
+		if action, ok := m.consumePendingDetailAction(msg.id); ok {
+			return m.handleShortcutAction(action)
+		}
 		return m, nil
 
 	case addTorrentMsg:
@@ -639,6 +646,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.helpVisible {
+		if action, ok := m.matchShortcut(msg); ok {
+			return m.handleShortcutAction(action)
+		}
+		return m, nil
+	}
 
 	switch m.mode {
 	case modeAuthChoice:
@@ -697,451 +710,506 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, pollDeviceCmd(m.service, *m.deviceCode)
 			}
 		}
+	}
 
-	case modeMain:
-		switch msg.String() {
-		case "q":
-			if m.filterApplied {
-				m.filterApplied = false
-				m.filteredTorrents = nil
-				m.selectedIdx = 0
-				return m, nil
-			}
-			return m, tea.Quit
-		case "/":
-			if !m.filterApplied {
-				m.searchInput.Reset()
-			}
-			m.mode = modeSearch
-			m.errText = ""
-			m.applyFilter()
-			return m, m.searchInput.Focus()
-		case "enter":
-			vis := m.visibleTorrents()
-			if len(vis) == 0 {
-				return m, nil
-			}
-			m.mode = modeDetail
-			if m.detail == nil || m.detail.ID != m.selectedTorrentID() {
-				m.loading = true
-				return m, detailCmd(m.service, m.selectedTorrentID())
-			}
-			return m, nil
-		case "up", "k":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
-				return m, detailCmd(m.service, m.selectedTorrentID())
-			}
-		case "down", "j":
-			vis := m.visibleTorrents()
-			if m.selectedIdx < len(vis)-1 {
-				m.selectedIdx++
-				return m, detailCmd(m.service, m.selectedTorrentID())
-			}
-		case "S":
-			m.sortByColumn(colStatus)
-			return m, nil
-		case "P":
-			m.sortByColumn(colProgress)
-			return m, nil
-		case "Z":
-			m.sortByColumn(colSize)
-			return m, nil
-		case "D":
-			m.sortByColumn(colAdded)
-			return m, nil
-		case "N":
-			m.sortByColumn(colName)
-			return m, nil
-		case "r":
-			m.loading = true
-			return m, refreshCmd(m.service)
-		case "m":
-			m.mode = modeMagnetInput
-			m.inputAction = inputMagnet
-			m.inputPrompt = "Paste a magnet link"
-			m.input.Reset()
-			m.input.Placeholder = "magnet:?xt=urn:btih:..."
-			m.errText = ""
-			return m, m.input.Focus()
-		case "u":
-			m.mode = modeURLInput
-			m.inputAction = inputURL
-			m.inputPrompt = "Paste a .torrent URL"
-			m.input.Reset()
-			m.input.Placeholder = "https://example.com/file.torrent"
-			m.errText = ""
-			return m, m.input.Focus()
-		case "i":
-			m.browser = newFileBrowser(".")
-			m.mode = modeFileBrowser
-			m.errText = ""
-			debug.Log("handler: entering file browser, dir=%s", m.browser.CurrentDir)
-			return m, m.browser.readDirCmd()
-		case "s":
-			if m.detail == nil || m.detail.Status != "waiting_files_selection" {
-				m.errText = "Selected torrent is not waiting for file selection"
-				return m, nil
-			}
-			m.returnMode = modeMain
-			m.selector = newSelectFilesState(*m.detail)
-			m.mode = modeSelectFiles
-			return m, nil
-		case "y":
-			if m.hasBatchSelection() {
-				ids := m.batchSelectedIDs()
-				m.loading = true
-				m.returnMode = modeMain
-				return m, batchOpCmd(m.service, batchOpCopy, ids, m.torrents)
-			}
-			m.returnMode = modeMain
-			return m.beginHandoff(handoffCopy)
-		case "d":
-			if m.batchMode {
-				return m, nil
-			}
-			m.returnMode = modeMain
-			return m.beginHandoff(handoffDownload)
-		case "b":
-			m.batchMode = !m.batchMode
-			if !m.batchMode {
-				m.clearBatchSelection()
-			}
-			m.errText = ""
-			return m, nil
-		case "space":
-			if m.batchMode && len(m.visibleTorrents()) > 0 {
-				m.toggleBatchMark(m.selectedTorrentID())
-				return m, nil
-			}
-		case "ctrl+a":
-			if m.batchMode {
-				m.selectAllTorrents()
-				return m, nil
-			}
-		case "ctrl+d":
-			if m.batchMode {
-				m.clearBatchSelection()
-				return m, nil
-			}
-		case "esc":
-			if m.batchMode {
-				m.clearBatchSelection()
-				m.batchMode = false
-				return m, nil
-			}
-		case "x":
-			if m.hasBatchSelection() {
-				m.deleteIDs = m.batchSelectedIDs()
-				m.returnMode = modeMain
-				m.mode = modeDelete
-				return m, nil
-			}
-			if m.detail == nil {
-				return m, nil
-			}
-			m.returnMode = modeMain
-			m.mode = modeDelete
-			m.deleteIDs = []string{m.detail.ID}
-			return m, nil
-		}
+	if action, ok := m.matchShortcut(msg); ok {
+		return m.handleShortcutAction(action)
+	}
 
+	switch m.mode {
 	case modeSearch:
-		switch msg.String() {
-		case "esc":
-			m.searchInput.Blur()
-			m.searchInput.Reset()
-			m.filterApplied = false
-			m.filteredTorrents = nil
-			m.selectedIdx = 0
-			m.mode = modeMain
-			return m, nil
-		case "enter":
-			if m.searchInput.Value() == "" {
-				m.filterApplied = false
-				m.filteredTorrents = nil
-			} else {
-				m.filterApplied = true
-				m.searchInput.Blur()
-			}
-			m.mode = modeMain
-			return m, nil
-		case "up", "k":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
-				return m, detailCmd(m.service, m.selectedTorrentID())
-			}
-			return m, nil
-		case "down", "j":
-			vis := m.visibleTorrents()
-			if m.selectedIdx < len(vis)-1 {
-				m.selectedIdx++
-				return m, detailCmd(m.service, m.selectedTorrentID())
-			}
-			return m, nil
-		}
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
 		m.applyFilter()
 		return m, cmd
-
-	case modeDetail:
-		switch msg.String() {
-		case "esc":
-			m.mode = modeMain
-			return m, nil
-		case "s":
-			if m.detail == nil || m.detail.Status != "waiting_files_selection" {
-				m.errText = "Selected torrent is not waiting for file selection"
-				return m, nil
-			}
-			m.returnMode = modeDetail
-			m.selector = newSelectFilesState(*m.detail)
-			m.mode = modeSelectFiles
-			return m, nil
-		case "y":
-			m.returnMode = modeDetail
-			return m.beginHandoff(handoffCopy)
-		case "d":
-			m.returnMode = modeDetail
-			return m.beginHandoff(handoffDownload)
-		case "x":
-			if m.detail == nil {
-				return m, nil
-			}
-			m.returnMode = modeDetail
-			m.mode = modeDelete
-			m.deleteIDs = []string{m.detail.ID}
-			return m, nil
-		case "r":
-			m.loading = true
-			return m, refreshCmd(m.service)
-		}
-
 	case modeFileBrowser:
 		m.errText = ""
-		key := msg.String()
 		debug.Log("handler: fileBrowser key=%q cursor=%d entries=%d selected=%d visual=%v editing=%v",
-			key, m.browser.Cursor, len(m.browser.Entries), len(m.browser.Selected), m.browser.VisualMode, m.browser.EditingPath)
-
+			msg.String(), m.browser.Cursor, len(m.browser.Entries), len(m.browser.Selected), m.browser.VisualMode, m.browser.EditingPath)
 		if m.browser.EditingPath {
-			switch key {
-			case "esc":
-				m.browser.stopEditing()
-				return m, m.browser.readDirCmd()
-			case "enter":
-				cmd, _, _, errMsg := m.browser.confirmPath()
-				if errMsg != "" {
-					m.errText = errMsg
-				} else {
-					m.errText = ""
-				}
-				return m, cmd
-			case "tab":
-				m.browser.tabComplete()
-				return m, nil
-			case "up", "k":
-				m.browser.moveEditCursor(-1)
-				return m, nil
-			case "down", "j":
-				m.browser.moveEditCursor(1)
-				return m, nil
-			}
 			var cmd tea.Cmd
 			m.browser.pathInput, cmd = m.browser.pathInput.Update(msg)
 			m.browser.updateCompletions()
 			return m, cmd
 		}
+	}
 
-		var browserCmd tea.Cmd
-		switch key {
-		case "esc":
+	return m, nil
+}
+
+func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) {
+	switch action {
+	case actionToggleHelp:
+		m.helpVisible = true
+		return m, nil
+	case actionCloseHelp:
+		m.helpVisible = false
+		return m, nil
+	case actionQuit:
+		if m.mode == modeMain && m.filterApplied {
+			m.filterApplied = false
+			m.filteredTorrents = nil
+			m.selectedIdx = 0
+			return m, nil
+		}
+		return m, tea.Quit
+	case actionMoveUp:
+		return m.handleMove(-1)
+	case actionMoveDown:
+		return m.handleMove(1)
+	case actionOpenDetail:
+		vis := m.visibleTorrents()
+		if len(vis) == 0 {
+			return m, nil
+		}
+		m.mode = modeDetail
+		if m.detail == nil || m.detail.ID != m.selectedTorrentID() {
+			m.loading = true
+			return m, detailCmd(m.service, m.selectedTorrentID())
+		}
+		return m, nil
+	case actionOpenSearch:
+		if !m.filterApplied {
+			m.searchInput.Reset()
+		}
+		m.mode = modeSearch
+		m.errText = ""
+		m.applyFilter()
+		return m, m.searchInput.Focus()
+	case actionSortStatus:
+		m.sortByColumn(colStatus)
+		return m, nil
+	case actionSortProgress:
+		m.sortByColumn(colProgress)
+		return m, nil
+	case actionSortSize:
+		m.sortByColumn(colSize)
+		return m, nil
+	case actionSortAdded:
+		m.sortByColumn(colAdded)
+		return m, nil
+	case actionSortName:
+		m.sortByColumn(colName)
+		return m, nil
+	case actionRefresh:
+		switch m.mode {
+		case modeDownload:
+			m.loading = true
+			return m, downloadStatusCmd(m.service)
+		default:
+			m.loading = true
+			return m, refreshCmd(m.service)
+		}
+	case actionOpenMagnetInput:
+		m.mode = modeMagnetInput
+		m.inputAction = inputMagnet
+		m.inputPrompt = "Paste a magnet link"
+		m.input.Reset()
+		m.input.Placeholder = "magnet:?xt=urn:btih:..."
+		m.errText = ""
+		return m, m.input.Focus()
+	case actionOpenURLInput:
+		m.mode = modeURLInput
+		m.inputAction = inputURL
+		m.inputPrompt = "Paste a .torrent URL"
+		m.input.Reset()
+		m.input.Placeholder = "https://example.com/file.torrent"
+		m.errText = ""
+		return m, m.input.Focus()
+	case actionOpenImport:
+		m.browser = newFileBrowser(".")
+		if m.mode == modeDetail {
+			m.returnMode = modeDetail
+		} else {
+			m.returnMode = modeMain
+		}
+		m.mode = modeFileBrowser
+		m.errText = ""
+		debug.Log("handler: entering file browser, dir=%s", m.browser.CurrentDir)
+		return m, m.browser.readDirCmd()
+	case actionOpenSelectFiles:
+		return m.handleSelectFilesAction()
+	case actionCopyURL:
+		return m.handleCopyAction()
+	case actionStartDownload:
+		return m.handleDownloadAction()
+	case actionDelete:
+		return m.handleDeleteAction()
+	case actionToggleBatch:
+		m.batchMode = !m.batchMode
+		if !m.batchMode {
+			m.clearBatchSelection()
+		}
+		m.errText = ""
+		return m, nil
+	case actionExitBatch:
+		m.clearBatchSelection()
+		m.batchMode = false
+		return m, nil
+	case actionBatchMark:
+		if m.batchMode && len(m.visibleTorrents()) > 0 {
+			m.toggleBatchMark(m.selectedTorrentID())
+		}
+		return m, nil
+	case actionBatchAll:
+		if m.batchMode {
+			m.selectAllTorrents()
+		}
+		return m, nil
+	case actionBatchClear:
+		if m.batchMode {
+			m.clearBatchSelection()
+		}
+		return m, nil
+	case actionSearchCancel:
+		m.searchInput.Blur()
+		m.searchInput.Reset()
+		m.filterApplied = false
+		m.filteredTorrents = nil
+		m.selectedIdx = 0
+		m.mode = modeMain
+		return m, nil
+	case actionSearchConfirm:
+		if m.searchInput.Value() == "" {
+			m.filterApplied = false
+			m.filteredTorrents = nil
+		} else {
+			m.filterApplied = true
+			m.searchInput.Blur()
+		}
+		m.mode = modeMain
+		return m, nil
+	case actionBack:
+		switch m.mode {
+		case modeDetail:
 			m.mode = modeMain
-			return m, nil
-		case "up", "k":
-			m.browser.move(-1)
-		case "down", "j":
-			m.browser.move(1)
-		case "enter", "right", "l":
-			browserCmd = m.browser.openCurrent()
-		case "space":
-			m.browser.toggleCurrent()
-		case "/":
-			m.browser.startEditing()
-		case "V":
-			m.browser.toggleVisual()
-		case "ctrl+a":
-			m.browser.toggleAll()
-		case "ctrl+d":
-			m.browser.clearSelection()
-		case "H":
-			m.browser.ShowHidden = !m.browser.ShowHidden
-			browserCmd = m.browser.readDirCmd()
-		case "backspace", "left", "h":
-			browserCmd = m.browser.goUp()
-		case "pgup", "K":
-			m.browser.pageUp(m.height / 2)
-		case "pgdown", "J":
-			m.browser.pageDown(m.height / 2)
-		case "g":
-			m.browser.jumpTop()
-		case "G":
-			m.browser.jumpBottom()
-		case "ctrl+s":
-			selected := m.browser.selectedPaths()
-			valid, invalid := app.ValidTorrentFiles(selected)
-			if len(valid) == 0 {
-				if len(invalid) > 0 {
-					m.errText = "No valid .torrent files selected"
-				} else {
-					m.errText = "Select at least one .torrent file"
-				}
-				return m, nil
-			}
-			m.loading = true
-			return m, importCmd(m.service, valid)
-		}
-		return m, browserCmd
-
-	case modeSelectFiles:
-		switch msg.String() {
-		case "esc":
-			m.mode = m.returnMode
-			return m, nil
-		case "up", "k":
-			if m.selector.Cursor > 0 {
-				m.selector.Cursor--
-			}
-		case "down", "j":
-			if m.selector.Cursor < len(m.selector.Files)-1 {
-				m.selector.Cursor++
-			}
-		case "space":
-			m.selector.toggleCurrent()
-		case "ctrl+a":
-			for _, file := range m.selector.Files {
-				m.selector.Selected[file.ID] = true
-			}
-		case "ctrl+d":
-			m.selector.Selected = map[int]bool{}
-		case "enter":
-			ids := m.selector.selectedIDs()
-			if len(ids) == 0 {
-				m.errText = "Select at least one file"
-				return m, nil
-			}
-			m.loading = true
-			return m, selectFilesCmd(m.service, m.detail.ID, ids)
-		}
-		return m, nil
-
-	case modeChooseTarget:
-		switch msg.String() {
-		case "esc":
-			m.mode = m.returnMode
-			return m, nil
-		case "up", "k":
-			if m.targets.Cursor > 0 {
-				m.targets.Cursor--
-			}
-		case "down", "j":
-			if m.targets.Cursor < len(m.targets.Items)-1 {
-				m.targets.Cursor++
-			}
-		case "enter":
-			if len(m.targets.Items) == 0 {
-				return m, nil
-			}
-			if m.targets.Action == handoffDownload && m.detail != nil {
-				m.downloadTorrentID = m.detail.ID
-			}
-			m.loading = true
-			if m.targets.Action == handoffDownload {
-				return m, resolveDownloadCmd(m.service, m.targets.Items[m.targets.Cursor])
-			}
-			return m, handoffCmd(m.service, m.targets.Items[m.targets.Cursor])
-		}
-		return m, nil
-
-	case modeOverwrite:
-		switch msg.String() {
-		case "esc", "n":
-			m.mode = m.returnMode
-			m.pendingDownload = nil
-			m.status = "Download cancelled"
-			m.errText = ""
-			return m, nil
-		case "y", "enter":
-			if m.pendingDownload == nil {
-				m.mode = m.returnMode
-				return m, nil
-			}
-			return m.startPendingDownload(m.pendingDownload.URL, m.pendingDownload.Filename)
-		}
-		return m, nil
-
-	case modeShowURL:
-		switch msg.String() {
-		case "esc", "enter":
-			m.mode = m.returnMode
-			return m, nil
-		}
-
-	case modeDownload:
-		switch msg.String() {
-		case "esc":
+		case modeDownload:
 			m.mode = m.returnMode
 			if m.download != nil && !m.download.IsTerminal() {
 				m.status = "Download continues in background"
 			}
-			return m, nil
-		case "r":
-			m.loading = true
-			return m, downloadStatusCmd(m.service)
-		case "o":
-			if m.download == nil || !m.download.IsComplete() || m.download.FilePath == "" {
-				return m, nil
+		case modeFileBrowser:
+			m.mode = m.returnMode
+		}
+		return m, nil
+	case actionBrowserOpenOrToggle:
+		return m, m.browser.openCurrent()
+	case actionBrowserToggle:
+		m.browser.toggleCurrent()
+		return m, nil
+	case actionBrowserEditPath:
+		m.browser.startEditing()
+		return m, nil
+	case actionBrowserToggleVisual:
+		m.browser.toggleVisual()
+		return m, nil
+	case actionBrowserToggleAll:
+		m.browser.toggleAll()
+		return m, nil
+	case actionBrowserClear:
+		m.browser.clearSelection()
+		return m, nil
+	case actionBrowserToggleHidden:
+		m.browser.ShowHidden = !m.browser.ShowHidden
+		return m, m.browser.readDirCmd()
+	case actionBrowserUpDir:
+		return m, m.browser.goUp()
+	case actionBrowserPageUp:
+		m.browser.pageUp(m.height / 2)
+		return m, nil
+	case actionBrowserPageDown:
+		m.browser.pageDown(m.height / 2)
+		return m, nil
+	case actionBrowserTop:
+		m.browser.jumpTop()
+		return m, nil
+	case actionBrowserBottom:
+		m.browser.jumpBottom()
+		return m, nil
+	case actionBrowserImport:
+		selected := m.browser.selectedPaths()
+		valid, invalid := app.ValidTorrentFiles(selected)
+		if len(valid) == 0 {
+			if len(invalid) > 0 {
+				m.errText = "No valid .torrent files selected"
+			} else {
+				m.errText = "Select at least one .torrent file"
 			}
+			return m, nil
+		}
+		m.loading = true
+		return m, importCmd(m.service, valid)
+	case actionBrowserEditConfirm:
+		cmd, _, _, errMsg := m.browser.confirmPath()
+		if errMsg != "" {
+			m.errText = errMsg
+		} else {
+			m.errText = ""
+		}
+		return m, cmd
+	case actionBrowserEditComplete:
+		m.browser.tabComplete()
+		return m, nil
+	case actionBrowserEditCancel:
+		m.browser.stopEditing()
+		return m, m.browser.readDirCmd()
+	case actionPopupCancel:
+		return m.handlePopupCancel()
+	case actionPopupConfirm:
+		return m.handlePopupConfirm()
+	case actionToggleSelection:
+		if m.mode == modeSelectFiles {
+			m.selector.toggleCurrent()
+		}
+		return m, nil
+	case actionSelectAll:
+		if m.mode == modeSelectFiles {
+			for _, file := range m.selector.Files {
+				m.selector.Selected[file.ID] = true
+			}
+		}
+		return m, nil
+	case actionClearSelection:
+		if m.mode == modeSelectFiles {
+			m.selector.Selected = map[int]bool{}
+		}
+		return m, nil
+	case actionOpenFile:
+		if m.canOpenManagedDownloadFile() {
 			m.loading = true
 			return m, openDownloadCmd(m.service, m.download.FilePath)
-		case "s":
-			if m.download == nil || !m.download.IsComplete() || m.download.FilePath == "" {
-				return m, nil
-			}
+		}
+		return m, nil
+	case actionRevealFile:
+		if m.canOpenManagedDownloadFile() {
 			m.loading = true
 			return m, revealDownloadCmd(m.service, m.download.FilePath)
-		case "x":
-			if m.download == nil || !m.download.IsComplete() || m.downloadTorrentID == "" {
-				return m, nil
-			}
-			m.returnMode = modeDownload
-			m.mode = modeDelete
-			m.deleteIDs = []string{m.downloadTorrentID}
-			return m, nil
 		}
-
-	case modeDelete:
-		switch msg.String() {
-		case "esc", "n":
-			m.mode = m.returnMode
-			m.deleteIDs = nil
-			return m, nil
-		case "y", "enter":
-			if len(m.deleteIDs) > 1 {
-				m.loading = true
-				ids := make([]string, len(m.deleteIDs))
-				copy(ids, m.deleteIDs)
-				return m, batchOpCmd(m.service, batchOpDelete, ids, m.torrents)
-			}
-			if len(m.deleteIDs) == 0 {
-				m.mode = m.returnMode
-				return m, nil
-			}
-			m.loading = true
-			return m, deleteCmd(m.service, m.deleteIDs[0])
-		}
+		return m, nil
 	}
+	return m, nil
+}
 
+func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeMain, modeSearch:
+		newIdx := m.selectedIdx + delta
+		vis := m.visibleTorrents()
+		if newIdx < 0 || newIdx >= len(vis) {
+			return m, nil
+		}
+		m.selectedIdx = newIdx
+		return m, detailCmd(m.service, m.selectedTorrentID())
+	case modeFileBrowser:
+		if m.browser.EditingPath {
+			m.browser.moveEditCursor(delta)
+		} else {
+			m.browser.move(delta)
+		}
+		return m, nil
+	case modeSelectFiles:
+		newIdx := m.selector.Cursor + delta
+		if newIdx < 0 || newIdx >= len(m.selector.Files) {
+			return m, nil
+		}
+		m.selector.Cursor = newIdx
+		return m, nil
+	case modeChooseTarget:
+		newIdx := m.targets.Cursor + delta
+		if newIdx < 0 || newIdx >= len(m.targets.Items) {
+			return m, nil
+		}
+		m.targets.Cursor = newIdx
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handleSelectFilesAction() (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeMain:
+		if !m.canSelectFilesFromSelection() {
+			m.errText = "Selected torrent is not waiting for file selection"
+			return m, nil
+		}
+		if m.detail == nil || m.detail.ID != m.selectedTorrentID() || m.detail.Status != "waiting_files_selection" {
+			return m.queueSelectedDetailAction(actionOpenSelectFiles)
+		}
+		m.returnMode = modeMain
+		m.selector = newSelectFilesState(*m.detail)
+		m.mode = modeSelectFiles
+		return m, nil
+	case modeDetail:
+		if !m.canSelectFilesFromDetail() {
+			m.errText = "Selected torrent is not waiting for file selection"
+			return m, nil
+		}
+		m.returnMode = modeDetail
+		m.selector = newSelectFilesState(*m.detail)
+		m.mode = modeSelectFiles
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handleCopyAction() (tea.Model, tea.Cmd) {
+	if m.mode == modeMain && m.hasBatchSelection() {
+		ids := m.batchSelectedIDs()
+		m.loading = true
+		m.returnMode = modeMain
+		return m, batchOpCmd(m.service, batchOpCopy, ids, m.torrents)
+	}
+	if m.mode == modeMain {
+		if !m.canReadyActionsFromSelection() {
+			m.errText = "Selected torrent is not ready to download"
+			return m, nil
+		}
+		m.returnMode = modeMain
+		if m.detail == nil || m.detail.ID != m.selectedTorrentID() || m.detail.Status != "downloaded" {
+			return m.queueSelectedDetailAction(actionCopyURL)
+		}
+		return m.beginHandoff(handoffCopy)
+	}
+	if m.mode == modeDetail {
+		m.returnMode = modeDetail
+		return m.beginHandoff(handoffCopy)
+	}
+	return m, nil
+}
+
+func (m Model) handleDownloadAction() (tea.Model, tea.Cmd) {
+	if m.mode == modeMain {
+		if m.batchMode {
+			return m, nil
+		}
+		if m.detail != nil && m.detail.Status == "downloaded" {
+			m.returnMode = modeMain
+			return m.beginHandoff(handoffDownload)
+		}
+		if !m.canReadyActionsFromSelection() {
+			m.errText = "Selected torrent is not ready to download"
+			return m, nil
+		}
+		m.returnMode = modeMain
+		if m.detail == nil || m.detail.ID != m.selectedTorrentID() || m.detail.Status != "downloaded" {
+			return m.queueSelectedDetailAction(actionStartDownload)
+		}
+		return m.beginHandoff(handoffDownload)
+	}
+	if m.mode == modeDetail {
+		m.returnMode = modeDetail
+		return m.beginHandoff(handoffDownload)
+	}
+	return m, nil
+}
+
+func (m Model) handleDeleteAction() (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeMain:
+		if m.hasBatchSelection() {
+			m.deleteIDs = m.batchSelectedIDs()
+			m.returnMode = modeMain
+			m.mode = modeDelete
+			return m, nil
+		}
+		id := m.selectedTorrentID()
+		if id == "" {
+			return m, nil
+		}
+		m.returnMode = modeMain
+		m.mode = modeDelete
+		m.deleteIDs = []string{id}
+		return m, nil
+	case modeDetail:
+		if m.detail == nil {
+			return m, nil
+		}
+		m.returnMode = modeDetail
+		m.mode = modeDelete
+		m.deleteIDs = []string{m.detail.ID}
+		return m, nil
+	case modeDownload:
+		if !m.canDeleteManagedDownloadTorrent() {
+			return m, nil
+		}
+		m.returnMode = modeDownload
+		m.mode = modeDelete
+		m.deleteIDs = []string{m.downloadTorrentID}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handlePopupCancel() (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeSelectFiles, modeChooseTarget:
+		m.mode = m.returnMode
+		return m, nil
+	case modeDelete:
+		m.mode = m.returnMode
+		m.deleteIDs = nil
+		return m, nil
+	case modeOverwrite:
+		m.mode = m.returnMode
+		m.pendingDownload = nil
+		m.status = "Download cancelled"
+		m.errText = ""
+		return m, nil
+	case modeShowURL:
+		m.mode = m.returnMode
+		return m, nil
+	case modeFileBrowser:
+		m.mode = m.returnMode
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeSelectFiles:
+		ids := m.selector.selectedIDs()
+		if len(ids) == 0 {
+			m.errText = "Select at least one file"
+			return m, nil
+		}
+		m.loading = true
+		return m, selectFilesCmd(m.service, m.detail.ID, ids)
+	case modeChooseTarget:
+		if len(m.targets.Items) == 0 {
+			return m, nil
+		}
+		if m.targets.Action == handoffDownload && m.detail != nil {
+			m.downloadTorrentID = m.detail.ID
+		}
+		m.loading = true
+		if m.targets.Action == handoffDownload {
+			return m, resolveDownloadCmd(m.service, m.targets.Items[m.targets.Cursor])
+		}
+		return m, handoffCmd(m.service, m.targets.Items[m.targets.Cursor])
+	case modeDelete:
+		if len(m.deleteIDs) > 1 {
+			m.loading = true
+			ids := make([]string, len(m.deleteIDs))
+			copy(ids, m.deleteIDs)
+			return m, batchOpCmd(m.service, batchOpDelete, ids, m.torrents)
+		}
+		if len(m.deleteIDs) == 0 {
+			m.mode = m.returnMode
+			return m, nil
+		}
+		m.loading = true
+		return m, deleteCmd(m.service, m.deleteIDs[0])
+	case modeOverwrite:
+		if m.pendingDownload == nil {
+			m.mode = m.returnMode
+			return m, nil
+		}
+		return m.startPendingDownload(m.pendingDownload.URL, m.pendingDownload.Filename)
+	case modeShowURL:
+		m.mode = m.returnMode
+		return m, nil
+	}
 	return m, nil
 }
 

@@ -576,19 +576,8 @@ func (b fileBrowserState) view(width, height int) string {
 		}
 	}
 
-	footer := renderFooterShortcuts(
-		shortcutHint{Key: "/", Desc: "edit path"},
-		shortcutHint{Key: "enter", Desc: "open/toggle"},
-		shortcutHint{Key: "space", Desc: "toggle"},
-		shortcutHint{Key: "V", Desc: "visual"},
-		shortcutHint{Key: "g/G", Desc: "top/bottom"},
-		shortcutHint{Key: "pgup/pgdn", Desc: "page"},
-		shortcutHint{Key: "ctrl+a", Desc: "all"},
-		shortcutHint{Key: "ctrl+d", Desc: "clear"},
-		shortcutHint{Key: "H", Desc: "hidden"},
-		shortcutHint{Key: "ctrl+s", Desc: "import"},
-		shortcutHint{Key: "esc", Desc: "cancel"},
-	)
+	browserModel := Model{mode: modeFileBrowser, browser: b}
+	footer := renderShortcutFooter(browserModel.renderShortcutDefs(), browserModel)
 	if b.VisualMode {
 		footer = headStyle.Render("[VISUAL]") + " " + footer
 	}
@@ -666,12 +655,8 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 		}
 	}
 
-	footer := headStyle.Render("[EDITING PATH]") + " " + renderFooterShortcuts(
-		shortcutHint{Key: "tab", Desc: "complete"},
-		shortcutHint{Key: "↑↓", Desc: "pick"},
-		shortcutHint{Key: "enter", Desc: "navigate/select"},
-		shortcutHint{Key: "esc", Desc: "cancel edit"},
-	)
+	browserModel := Model{mode: modeFileBrowser, browser: b}
+	footer := headStyle.Render("[EDITING PATH]") + " " + renderShortcutFooter(browserModel.renderShortcutDefs(), browserModel)
 	footer += footerSepStyle.Render("  ──  ") + selectedCountStyle.Render(fmt.Sprintf("selected: %d", len(b.Selected)))
 	lines = append(lines, "", footer)
 

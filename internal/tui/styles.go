@@ -59,6 +59,8 @@ var (
 	footerKeyStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
 	footerDescStyle = lipgloss.NewStyle().Foreground(colorMuted)
 	footerSepStyle  = lipgloss.NewStyle().Foreground(colorSubtle)
+	footerKeyDimStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorSubtle)
+	footerDescDimStyle = lipgloss.NewStyle().Foreground(colorSubtle)
 	selectedCountStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
 
 	// Panels / boxes (rounded cyberpunk style)

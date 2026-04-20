@@ -15,6 +15,10 @@ import (
 
 func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
+	if m.helpVisible {
+		bg := appStyle.Render(renderBackground(m))
+		return renderOverlayOnBackground(bg, renderHelpOverlay(m), m.width, m.height)
+	}
 	if isPopupMode(m.mode) {
 		bg := appStyle.Render(renderBackground(m))
 		return renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height)
@@ -143,7 +147,11 @@ func renderMain(m Model) string {
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(listFooter(m), innerWidth))
+	footer := renderShortcutFooter(m.renderShortcutDefs(), m)
+	if m.mode == modeMain && m.batchMode {
+		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
+	}
+	lines = append(lines, dividerLine(innerWidth), truncateLine(footer, innerWidth))
 	if m.loading {
 		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
@@ -201,7 +209,7 @@ func renderDetailView(m Model) string {
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(detailFooter(), innerWidth))
+	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
 	if m.loading {
 		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
@@ -256,7 +264,7 @@ func renderDownloadView(m Model) string {
 	if flash := renderFlash(m); flash != "" {
 		lines = append(lines, flash)
 	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(downloadFooter(m.download, m.downloadTorrentID != ""), innerWidth))
+	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
 	if m.loading {
 		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
 	}
@@ -343,84 +351,49 @@ func renderSearchBar(m Model) string {
 	return prefix + m.searchInput.View() + "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
 }
 
-func listFooter(m Model) string {
-	if m.mode == modeSearch {
-		return renderFooterShortcuts(
-			shortcutHint{Key: "esc", Desc: "clear"},
-			shortcutHint{Key: "enter", Desc: "keep"},
-			shortcutHint{Key: "↑↓", Desc: "navigate"},
-			shortcutHint{Key: "type", Desc: "filter"},
-		)
-	}
-	if m.batchMode {
-		return renderFooterShortcuts(
-			shortcutHint{Key: "space", Desc: "mark"},
-			shortcutHint{Key: "ctrl+a", Desc: "all"},
-			shortcutHint{Key: "ctrl+d", Desc: "clear"},
-			shortcutHint{Key: "x", Desc: "delete"},
-			shortcutHint{Key: "y", Desc: "copy"},
-			shortcutHint{Key: "b/esc", Desc: "exit"},
-		) + footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
-	}
-	return renderFooterShortcuts(
-		shortcutHint{Key: "↑↓ j/k", Desc: "move"},
-		shortcutHint{Key: "enter", Desc: "details"},
-		shortcutHint{Key: "S/P/Z/D/N", Desc: "sort"},
-		shortcutHint{Key: "/", Desc: "search"},
-		shortcutHint{Key: "r", Desc: "refresh"},
-		shortcutHint{Key: "m", Desc: "magnet"},
-		shortcutHint{Key: "u", Desc: "url"},
-		shortcutHint{Key: "i", Desc: "import"},
-		shortcutHint{Key: "b", Desc: "batch"},
-		shortcutHint{Key: "s", Desc: "select"},
-		shortcutHint{Key: "y", Desc: "copy"},
-		shortcutHint{Key: "d", Desc: "download"},
-		shortcutHint{Key: "x", Desc: "delete"},
-		shortcutHint{Key: "q", Desc: "quit"},
-	)
-}
-
-func detailFooter() string {
-	return renderFooterShortcuts(
-		shortcutHint{Key: "esc", Desc: "back"},
-		shortcutHint{Key: "s", Desc: "select"},
-		shortcutHint{Key: "y", Desc: "copy"},
-		shortcutHint{Key: "d", Desc: "download"},
-		shortcutHint{Key: "x", Desc: "delete"},
-		shortcutHint{Key: "r", Desc: "refresh"},
-	)
-}
-
-func downloadFooter(download *models.ManagedDownload, canDeleteTorrent bool) string {
-	if download != nil && download.IsComplete() {
-		items := []shortcutHint{{Key: "esc", Desc: "back"}, {Key: "o", Desc: "open"}, {Key: "s", Desc: "reveal"}}
-		if canDeleteTorrent {
-			items = append(items, shortcutHint{Key: "x", Desc: "delete torrent"})
-		}
-		items = append(items, shortcutHint{Key: "r", Desc: "refresh"})
-		return renderFooterShortcuts(items...)
-	}
-	return renderFooterShortcuts(
-		shortcutHint{Key: "esc", Desc: "back"},
-		shortcutHint{Key: "r", Desc: "refresh"},
-	)
-}
-
 type shortcutHint struct {
-	Key  string
-	Desc string
+	Key     string
+	Desc    string
+	Enabled bool
 }
 
 func renderFooterShortcuts(items ...shortcutHint) string {
 	parts := make([]string, 0, len(items))
 	for _, item := range items {
-		part := footerKeyStyle.Render(item.Key)
+		keyStyle := footerKeyStyle
+		descStyle := footerDescStyle
+		if !item.Enabled {
+			keyStyle = footerKeyDimStyle
+			descStyle = footerDescDimStyle
+		}
+		part := keyStyle.Render(item.Key)
 		if item.Desc != "" {
-			part += " " + footerDescStyle.Render(item.Desc)
+			part += " " + descStyle.Render(item.Desc)
 		}
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, footerSepStyle.Render("  ▪  "))
+}
+
+func listFooter(m Model) string {
+	footer := renderShortcutFooter(m.renderShortcutDefs(), m)
+	if m.mode == modeMain && m.batchMode {
+		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
+	}
+	return footer
+}
+
+func detailFooter() string {
+	m := Model{mode: modeDetail, detail: &models.TorrentInfo{Torrent: models.Torrent{Status: "downloaded"}}}
+	return renderShortcutFooter(m.renderShortcutDefs(), m)
+}
+
+func downloadFooter(download *models.ManagedDownload, canDeleteTorrent bool) string {
+	m := Model{mode: modeDownload, download: download}
+	if canDeleteTorrent {
+		m.downloadTorrentID = "torrent"
+	}
+	return renderShortcutFooter(m.renderShortcutDefs(), m)
 }
 
 func statusLabel(status string) string {
@@ -650,5 +623,3 @@ func max64(values ...int64) int64 {
 	}
 	return out
 }
-
-

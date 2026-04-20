@@ -405,6 +405,45 @@ func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
 	}
 }
 
+func TestSearchTypingJKDoesNotNavigate(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = modeMain
+	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
+	m.selectedIdx = 0
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = updated.(Model)
+
+	if m.searchInput.Value() != "jk" {
+		t.Fatalf("searchInput value = %q, want jk", m.searchInput.Value())
+	}
+	if m.selectedIdx != 0 {
+		t.Fatalf("selectedIdx = %d, want 0", m.selectedIdx)
+	}
+}
+
+func TestSearchQuestionMarkStaysInInput(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = modeMain
+	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
+	m = updated.(Model)
+
+	if m.helpVisible {
+		t.Fatal("help overlay should not open while search input is focused")
+	}
+	if m.searchInput.Value() != "?" {
+		t.Fatalf("searchInput value = %q, want ?", m.searchInput.Value())
+	}
+}
+
 func stripAnsi(s string) string {
 	var b strings.Builder
 	esc := false

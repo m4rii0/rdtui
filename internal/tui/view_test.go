@@ -165,7 +165,8 @@ func TestPadVisual(t *testing.T) {
 }
 
 func TestFootersMentionManagedDownload(t *testing.T) {
-	if got := ansi.Strip(listFooter(Model{})); !strings.Contains(got, "d download") {
+	main := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
+	if got := ansi.Strip(listFooter(main)); !strings.Contains(got, "d download") {
 		t.Fatalf("listFooter() = %q, want managed download hint", got)
 	}
 	if got := ansi.Strip(detailFooter()); !strings.Contains(got, "d download") {
@@ -173,10 +174,69 @@ func TestFootersMentionManagedDownload(t *testing.T) {
 	}
 }
 
+func TestListFooterDimsUnavailableActions(t *testing.T) {
+	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
+	got := ansi.Strip(listFooter(m))
+	if !strings.Contains(got, "d download") {
+		t.Fatalf("listFooter() = %q, should keep download visible for unfinished torrent", got)
+	}
+	if !strings.Contains(got, "y copy") {
+		t.Fatalf("listFooter() = %q, should keep copy visible for unfinished torrent", got)
+	}
+}
+
+func TestSearchFooterHidesUnrelatedActions(t *testing.T) {
+	m := Model{mode: modeSearch}
+	got := ansi.Strip(listFooter(m))
+	if !strings.Contains(got, "esc clear") || !strings.Contains(got, "enter keep") {
+		t.Fatalf("listFooter() = %q, want search actions", got)
+	}
+	if strings.Contains(got, "x delete") || strings.Contains(got, "d download") {
+		t.Fatalf("listFooter() = %q, should hide unrelated list actions", got)
+	}
+}
+
+func TestBrowserEditingFooterShowsOnlyEditingShortcuts(t *testing.T) {
+	b := newFileBrowser(".")
+	b.startEditing()
+	m := Model{mode: modeFileBrowser, browser: b}
+	footer := ansi.Strip(renderShortcutFooter(m.renderShortcutDefs(), m))
+	if strings.Contains(footer, "hidden") || strings.Contains(footer, "visual") {
+		t.Fatalf("footer = %q, should hide normal browser actions while editing", footer)
+	}
+	if !strings.Contains(footer, "tab complete") || !strings.Contains(footer, "enter navigate/select") {
+		t.Fatalf("footer = %q, want editing shortcuts", footer)
+	}
+}
+
+func TestBrowserFooterKeepsImportVisibleWhenUnavailable(t *testing.T) {
+	b := newFileBrowser(".")
+	m := Model{mode: modeFileBrowser, browser: b}
+	footer := ansi.Strip(renderShortcutFooter(m.renderShortcutDefs(), m))
+	if !strings.Contains(footer, "ctrl+s import") {
+		t.Fatalf("footer = %q, want import shortcut visible", footer)
+	}
+}
+
+func TestHelpOverlayKeepsUnavailableMainActionsVisible(t *testing.T) {
+	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
+	got := ansi.Strip(renderHelpOverlay(m))
+	if !strings.Contains(got, "y  copy") || !strings.Contains(got, "d  download") {
+		t.Fatalf("help overlay = %q, want unavailable actions still listed", got)
+	}
+}
+
 func TestDownloadFooterMentionsTorrentDeleteWhenAvailable(t *testing.T) {
 	got := ansi.Strip(downloadFooter(&models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}, true))
 	if !strings.Contains(got, "x delete torrent") {
 		t.Fatalf("downloadFooter() = %q, want delete torrent hint", got)
+	}
+}
+
+func TestDownloadFooterKeepsCompletionActionsVisibleWhileActive(t *testing.T) {
+	got := ansi.Strip(downloadFooter(&models.ManagedDownload{Status: models.ManagedDownloadStatusActive}, false))
+	if !strings.Contains(got, "o open") || !strings.Contains(got, "s reveal") || !strings.Contains(got, "x delete torrent") {
+		t.Fatalf("downloadFooter() = %q, want completion actions still visible", got)
 	}
 }
 
