@@ -2,6 +2,12 @@
 
 `rdtui` is a Go terminal UI for managing Real-Debrid torrents.
 
+## Disclaimer
+
+This repository is a personal project created and maintained by me in my own capacity. It is not affiliated with, endorsed by, sponsored by, or representative of my employer or any company I work for.
+
+All code, opinions, design decisions, and documentation in this repository are my own and do not reflect the views, policies, or interests of my employer.
+
 This first iteration focuses on:
 - authenticating with Real-Debrid
 - browsing current torrents
