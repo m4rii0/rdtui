@@ -6,7 +6,7 @@ BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
-.PHONY: help build run run-debug test test-race lint vet fmt tidy clean install check build-all
+.PHONY: help build run run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all
 
 help:
 	@printf '%s\n' \
@@ -23,7 +23,8 @@ help:
 	  '  make tidy       Tidy go.mod/go.sum' \
 	  '  make install    Install the binary with go install' \
 	  '  make clean      Remove build artifacts' \
-	  '  make check      Run fmt, lint, test, and build'
+	  '  make check      Run fmt, lint, test, and build' \
+	  '  make verify     Verify fmt, tidy, lint, test, and build without rewriting files'
 
 build:
 	@mkdir -p $(BIN_DIR)
@@ -65,8 +66,19 @@ lint: vet
 fmt:
 	$(GO) fmt ./...
 
+fmt-check:
+	@files="$$(gofmt -l $$(git ls-files '*.go'))"; \
+	if [ -n "$$files" ]; then \
+		printf '%s\n' 'Go files need formatting:'; \
+		printf '%s\n' "$$files"; \
+		exit 1; \
+	fi
+
 tidy:
 	$(GO) mod tidy
+
+tidy-check:
+	$(GO) mod tidy -diff
 
 install:
 	$(GO) install $(LDFLAGS) $(CMD_DIR)
@@ -75,3 +87,5 @@ clean:
 	rm -rf $(BIN_DIR)
 
 check: fmt lint test build
+
+verify: fmt-check tidy-check lint test build

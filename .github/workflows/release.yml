@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify
+        run: make verify VERSION="${GITHUB_REF_NAME}"
+
+      - name: Build release binaries
+        run: make clean build-all VERSION="${GITHUB_REF_NAME}"
+
+      - name: Verify embedded version
+        run: |
+          version_output="$(./bin/rdtui-linux-amd64 --version)"
+          expected="rdtui ${GITHUB_REF_NAME}"
+          if [ "$version_output" != "$expected" ]; then
+            printf 'expected %s, got %s\n' "$expected" "$version_output"
+            exit 1
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd bin
+          sha256sum rdtui-* > checksums.txt
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" bin/rdtui-* bin/checksums.txt --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" bin/rdtui-* bin/checksums.txt \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "Release ${GITHUB_REF_NAME}"
+          fi
