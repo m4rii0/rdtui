@@ -14,15 +14,16 @@ This repository is a personal project created and maintained by me in my own cap
 
 All code, opinions, design decisions, and documentation in this repository are my own and do not reflect the views, policies, or interests of my employer.
 
-This first iteration focuses on:
-- authenticating with Real-Debrid
-- browsing current torrents
-- adding magnet links and `.torrent` files
-- selecting files for waiting torrents
-- generating direct download URLs from ready torrents
-- handing those URLs off to your clipboard
-- downloading resolved links locally through either the built-in direct downloader or an app-managed `aria2c` session
-- deleting torrents
+## Current Functionality
+
+- Authenticate with Real-Debrid via device auth or private API token
+- Browse and manage your active torrent list
+- Add torrents via magnet links, remote `.torrent` URLs, or local `.torrent` file imports (including batch imports)
+- Select files for torrents awaiting file selection
+- Resolve ready torrents to direct download URLs and copy them to the clipboard
+- Download resolved links locally using the built-in HTTP downloader or an app-managed `aria2c` session
+- Monitor in-progress downloads with a live progress screen, with options to open the completed file, reveal it in its directory, or delete the source torrent
+- Delete torrents
 
 ## Requirements
 
