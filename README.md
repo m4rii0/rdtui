@@ -2,7 +2,11 @@
 
 `rdtui` is a Go terminal UI for managing Real-Debrid torrents.
 
-## Disclaimer
+## Status
+
+`rdtui` is an early public release. The core torrent management and download flows are implemented, but behavior and configuration may still change between releases.
+
+## Personal Project Disclaimer
 
 This repository is a personal project created and maintained by me in my own capacity. It is not affiliated with, endorsed by, sponsored by, or representative of my employer or any company I work for.
 
@@ -23,6 +27,18 @@ This first iteration focuses on:
 - Go 1.26+
 - A Real-Debrid account
 - `aria2c` installed on `PATH` only if you want to use the optional `aria2` download backend
+
+## Install
+
+```bash
+go install github.com/m4rii0/rdtui/cmd/rdtui@latest
+```
+
+Then run:
+
+```bash
+rdtui
+```
 
 ## Build
 
@@ -150,7 +166,9 @@ go test ./...
 
 This project is licensed under the [Apache License 2.0](LICENSE).
 
-## Disclaimer
+Copyright 2026 Mario (m4rii0).
+
+## Legal Disclaimer
 
 This project does not contain any copyrighted material. It is a client application that solely makes API calls to the [Real-Debrid](https://real-debrid.com) service. All content accessed through this tool is hosted and served by Real-Debrid; this repository contains no media files, torrents, or pirated content of any kind.
 
