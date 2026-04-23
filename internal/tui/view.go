@@ -515,7 +515,7 @@ func formatETA(value time.Duration) string {
 		return "Calculating..."
 	}
 	if value == 0 {
-		return "0s"
+		return "—"
 	}
 	return formatDuration(value)
 }

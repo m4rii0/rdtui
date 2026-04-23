@@ -131,6 +131,9 @@ func (d ManagedDownload) Progress() float64 {
 }
 
 func (d ManagedDownload) ETA() time.Duration {
+	if d.IsComplete() || (d.TotalLength > 0 && d.CompletedLength >= d.TotalLength) {
+		return 0
+	}
 	if d.DownloadSpeed <= 0 || d.TotalLength <= 0 {
 		return -1
 	}
