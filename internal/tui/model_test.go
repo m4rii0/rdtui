@@ -311,7 +311,7 @@ func TestDeleteFromMainView(t *testing.T) {
 	}
 }
 
-func TestDownloadFromMainViewOpensTargetPicker(t *testing.T) {
+func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
 	m := Model{
 		mode:       modeMain,
 		returnMode: modeMain,
@@ -325,17 +325,20 @@ func TestDownloadFromMainViewOpensTargetPicker(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(Model)
-	if m.mode != modeChooseTarget {
-		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain (single target skips picker)", m.mode)
 	}
-	if m.targets.Action != handoffDownload {
-		t.Fatalf("action = %q, want %q", m.targets.Action, handoffDownload)
+	if cmd == nil {
+		t.Fatal("expected resolve command when single target is available")
+	}
+	if !m.loading {
+		t.Fatal("expected loading to be true while resolving direct download")
 	}
 }
 
-func TestDownloadFromDetailViewOpensTargetPicker(t *testing.T) {
+func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
 	m := Model{
 		mode:       modeDetail,
 		returnMode: modeDetail,
@@ -345,13 +348,16 @@ func TestDownloadFromDetailViewOpensTargetPicker(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(Model)
-	if m.mode != modeChooseTarget {
-		t.Fatalf("mode = %q, want modeChooseTarget", m.mode)
+	if m.mode != modeDetail {
+		t.Fatalf("mode = %q, want modeDetail (single target skips picker)", m.mode)
 	}
-	if m.targets.Action != handoffDownload {
-		t.Fatalf("action = %q, want %q", m.targets.Action, handoffDownload)
+	if cmd == nil {
+		t.Fatal("expected resolve command when single target is available")
+	}
+	if !m.loading {
+		t.Fatal("expected loading to be true while resolving direct download")
 	}
 }
 
