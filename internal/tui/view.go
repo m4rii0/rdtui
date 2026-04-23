@@ -6,12 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
-
-
 
 func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
@@ -122,15 +121,12 @@ func renderMain(m Model) string {
 	if m.errText != "" {
 		reserved++
 	}
-	if m.loading {
-		reserved++
-	}
 	if m.mode == modeSearch || m.filterApplied {
 		reserved++
 	}
 	tableHeight := max(4, bodyHeight-reserved)
 
-	header := renderCompactHeader(m.version, username(m))
+	header := renderHeaderLine(renderCompactHeader(m.version, username(m)), m, innerWidth)
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
@@ -152,9 +148,6 @@ func renderMain(m Model) string {
 		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
 	}
 	lines = append(lines, dividerLine(innerWidth), truncateLine(footer, innerWidth))
-	if m.loading {
-		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -165,7 +158,7 @@ func renderDetailView(m Model) string {
 	}
 	innerWidth := max(20, width-4)
 
-	header := renderCompactHeader(m.version, username(m))
+	header := renderHeaderLine(renderCompactHeader(m.version, username(m)), m, innerWidth)
 
 	lines := []string{header, ""}
 
@@ -210,9 +203,6 @@ func renderDetailView(m Model) string {
 		lines = append(lines, flash)
 	}
 	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	if m.loading {
-		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -223,7 +213,7 @@ func renderDownloadView(m Model) string {
 	}
 	innerWidth := max(20, width-4)
 
-	header := renderCompactHeader(m.version, username(m))
+	header := renderHeaderLine(renderCompactHeader(m.version, username(m)), m, innerWidth)
 
 	lines := []string{header, ""}
 	if m.download == nil {
@@ -265,9 +255,6 @@ func renderDownloadView(m Model) string {
 		lines = append(lines, flash)
 	}
 	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	if m.loading {
-		lines = append(lines, m.spinner.View()+" "+mutedStyle.Render("working..."))
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -373,6 +360,26 @@ func renderFooterShortcuts(items ...shortcutHint) string {
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, footerSepStyle.Render("  ▪  "))
+}
+
+func renderHeaderLine(header string, m Model, width int) string {
+	if !m.loading {
+		return truncateLine(header, width)
+	}
+
+	working := m.spinner.View() + " " + mutedStyle.Render("working...")
+	workingWidth := lipgloss.Width(working)
+	if width <= workingWidth+2 {
+		return truncateLine(working, width)
+	}
+
+	headerWidth := width - workingWidth - 2
+	left := truncateLine(header, headerWidth)
+	gap := width - lipgloss.Width(left) - workingWidth
+	if gap < 2 {
+		gap = 2
+	}
+	return left + strings.Repeat(" ", gap) + working
 }
 
 func listFooter(m Model) string {
