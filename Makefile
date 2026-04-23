@@ -3,10 +3,13 @@ APP_NAME ?= rdtui
 CMD_DIR ?= ./cmd/rdtui
 BIN_DIR ?= bin
 BIN_PATH := $(BIN_DIR)/$(APP_NAME)
+VHS ?= vhs
+VHS_TAPE ?= docs/assets/rdtui-showcase.tape
+VHS_BROWSER_LIB_DIR ?= $(HOME)/.cache/rdtui-vhs-libs/usr/lib/x86_64-linux-gnu
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
-.PHONY: help build run run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all
+.PHONY: help build run run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-gif
 
 help:
 	@printf '%s\n' \
@@ -22,6 +25,7 @@ help:
 	  '  make fmt        Format Go code' \
 	  '  make tidy       Tidy go.mod/go.sum' \
 	  '  make install    Install the binary with go install' \
+	  '  make showcase-gif  Render the VHS showcase GIF' \
 	  '  make clean      Remove build artifacts' \
 	  '  make check      Run fmt, lint, test, and build' \
 	  '  make verify     Verify fmt, tidy, lint, test, and build without rewriting files'
@@ -82,6 +86,10 @@ tidy-check:
 
 install:
 	$(GO) install $(LDFLAGS) $(CMD_DIR)
+
+showcase-gif:
+	$(VHS) validate "$(VHS_TAPE)"
+	PATH="/usr/bin:/bin:$$PATH" LD_LIBRARY_PATH="$(VHS_BROWSER_LIB_DIR)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}" $(VHS) "$(VHS_TAPE)"
 
 clean:
 	rm -rf $(BIN_DIR)

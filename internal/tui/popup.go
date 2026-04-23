@@ -328,7 +328,7 @@ func renderInputPopup(m Model, prompt string) string {
 
 	title := headStyle.Render("◆ " + m.inputPrompt)
 	content := strings.Join([]string{
-		"  " + m.input.View(),
+		"  " + constrainedInputView(m, innerW-6),
 		"",
 		popupFooter(
 			shortcutHint{Key: "enter", Desc: "submit"},
@@ -339,6 +339,15 @@ func renderInputPopup(m Model, prompt string) string {
 		content += "\n" + errorStyle.Render("  ✗ "+m.errText)
 	}
 	return popupBox(title, content, innerW, false)
+}
+
+func constrainedInputView(m Model, width int) string {
+	width = max(1, width)
+	inputW := max(1, width-lipgloss.Width(m.input.Prompt)-1)
+	m.input.SetWidth(inputW)
+	m.input.SetCursor(m.input.Position())
+	view := ansi.Strip(strings.ReplaceAll(m.input.View(), "\n", " "))
+	return truncateLine(view, width)
 }
 
 func fileListWindow(total, selected, visible int) (int, int) {

@@ -2,6 +2,8 @@
 
 `rdtui` is a Go terminal UI for managing Real-Debrid torrents.
 
+![rdtui terminal showcase](docs/assets/rdtui-showcase.gif)
+
 ## Status
 
 `rdtui` is an early public release. The core torrent management and download flows are implemented, but behavior and configuration may still change between releases.

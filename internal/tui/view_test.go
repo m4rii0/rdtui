@@ -218,6 +218,37 @@ func TestBrowserFooterKeepsImportVisibleWhenUnavailable(t *testing.T) {
 	}
 }
 
+func TestConstrainedInputViewShowsTailOfLongMagnet(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = modeMagnetInput
+	m.input.SetValue("magnet:?xt=urn:btih:" + strings.Repeat("a", 80) + "restofthestring")
+	m.input.CursorEnd()
+
+	got := ansi.Strip(constrainedInputView(m, 30))
+	if !strings.Contains(got, "restofthestring") {
+		t.Fatalf("input view = %q, want pasted URL tail visible", got)
+	}
+	if w := lipgloss.Width(got); w > 30 {
+		t.Fatalf("input view width = %d, want <= 30: %q", w, got)
+	}
+}
+
+func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = modeMagnetInput
+	m.width = 100
+	m.height = 24
+	m.inputPrompt = "Paste a magnet link"
+	m.input.SetValue("magnet:?xt=urn:btih:" + strings.Repeat("a", 80) + "restofthestring")
+	m.input.CursorEnd()
+
+	for _, line := range strings.Split(ansi.Strip(renderInputPopup(m, "Paste a magnet link")), "\n") {
+		if strings.Contains(line, "restofthestring") && !strings.Contains(line, ">") {
+			t.Fatalf("long input wrapped away from prompt line: %q", line)
+		}
+	}
+}
+
 func TestHelpOverlayKeepsUnavailableMainActionsVisible(t *testing.T) {
 	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
 	got := ansi.Strip(renderHelpOverlay(m))
