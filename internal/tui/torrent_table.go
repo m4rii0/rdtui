@@ -138,7 +138,7 @@ func torrentStatusRank(status string) int {
 		return 0
 	case "queued", "compressing", "uploading":
 		return 1
-	case "waiting_files_selection":
+	case "waiting_files_selection", "magnet_conversion":
 		return 2
 	case "downloaded":
 		return 3
@@ -240,6 +240,8 @@ func statusLabelPlain(status string) string {
 		return "◌ UL"
 	case "waiting_files_selection":
 		return "◐ WAIT"
+	case "magnet_conversion":
+		return "◐ MAG"
 	case "error":
 		return "✗ ERR"
 	case "dead":
@@ -269,6 +271,8 @@ func statusLabelForSearch(status string) string {
 		return "UL"
 	case "waiting_files_selection":
 		return "WAIT"
+	case "magnet_conversion":
+		return "MAG"
 	case "error":
 		return "ERR"
 	case "dead":

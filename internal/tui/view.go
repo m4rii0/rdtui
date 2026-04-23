@@ -431,7 +431,7 @@ func styledStatusLabel(status, text string) string {
 		return statusWaitingStyle.Render(text)
 	case "uploading":
 		return statusWaitingStyle.Render(text)
-	case "waiting_files_selection":
+	case "waiting_files_selection", "magnet_conversion":
 		return statusWaitingStyle.Render(text)
 	case "error":
 		return statusErrorStyle.Render(text)
@@ -452,7 +452,7 @@ func styledStatus(status string) string {
 		return statusDownloadedStyle.Render(status)
 	case "downloading":
 		return statusDownloadingStyle.Render(status)
-	case "waiting_files_selection":
+	case "waiting_files_selection", "magnet_conversion":
 		return statusWaitingStyle.Render(status)
 	case "error", "dead", "virus", "magnet_error":
 		return statusErrorStyle.Render(status)

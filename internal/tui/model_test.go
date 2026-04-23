@@ -151,12 +151,29 @@ func TestStatusRankOrdering(t *testing.T) {
 		"error":                   5,
 		"unknown_status":          4,
 		"waiting_files_selection": 2,
+		"magnet_conversion":       2,
 	}
 	for status, want := range ranks {
 		got := torrentStatusRank(status)
 		if got != want {
 			t.Errorf("torrentStatusRank(%q) = %d, want %d", status, got, want)
 		}
+	}
+}
+
+func TestCanSelectFilesIncludesMagnetConversion(t *testing.T) {
+	m := Model{
+		mode:        modeMain,
+		torrents:    []models.Torrent{{ID: "a", Status: "magnet_conversion"}},
+		selectedIdx: 0,
+	}
+	if !m.canSelectFilesFromSelection() {
+		t.Fatal("expected magnet_conversion to allow file selection from list")
+	}
+
+	m.detail = &models.TorrentInfo{Torrent: models.Torrent{ID: "a", Status: "magnet_conversion"}}
+	if !m.canSelectFilesFromDetail() {
+		t.Fatal("expected magnet_conversion to allow file selection from detail")
 	}
 }
 

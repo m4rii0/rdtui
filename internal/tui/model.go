@@ -1029,10 +1029,10 @@ func (m Model) handleSelectFilesAction() (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeMain:
 		if !m.canSelectFilesFromSelection() {
-			m.errText = "Selected torrent is not waiting for file selection"
+			m.errText = "Selected torrent is not ready for file selection"
 			return m, nil
 		}
-		if m.detail == nil || m.detail.ID != m.selectedTorrentID() || m.detail.Status != "waiting_files_selection" {
+		if m.detail == nil || m.detail.ID != m.selectedTorrentID() || !isFileSelectionStatus(m.detail.Status) {
 			return m.queueSelectedDetailAction(actionOpenSelectFiles)
 		}
 		m.returnMode = modeMain
@@ -1041,7 +1041,7 @@ func (m Model) handleSelectFilesAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	case modeDetail:
 		if !m.canSelectFilesFromDetail() {
-			m.errText = "Selected torrent is not waiting for file selection"
+			m.errText = "Selected torrent is not ready for file selection"
 			return m, nil
 		}
 		m.returnMode = modeDetail

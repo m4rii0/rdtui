@@ -42,7 +42,7 @@ func (m Model) selectedTorrentStatus() string {
 }
 
 func (m Model) canSelectFilesFromSelection() bool {
-	return m.selectedTorrentStatus() == "waiting_files_selection"
+	return isFileSelectionStatus(m.selectedTorrentStatus())
 }
 
 func (m Model) canReadyActionsFromSelection() bool {
@@ -54,7 +54,16 @@ func (m Model) canDeleteSelectedTorrent() bool {
 }
 
 func (m Model) canSelectFilesFromDetail() bool {
-	return m.detail != nil && m.detail.Status == "waiting_files_selection"
+	return m.detail != nil && isFileSelectionStatus(m.detail.Status)
+}
+
+func isFileSelectionStatus(status string) bool {
+	switch status {
+	case "waiting_files_selection", "magnet_conversion":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m Model) canReadyActionsFromDetail() bool {
