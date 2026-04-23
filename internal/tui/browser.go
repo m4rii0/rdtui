@@ -40,10 +40,10 @@ type fileBrowserState struct {
 	VisualAnchor int
 	navStack     []navFrame
 
-	pathInput      textinput.Model
-	EditingPath    bool
+	pathInput       textinput.Model
+	EditingPath     bool
 	editCompletions []browserEntry
-	editCursor     int
+	editCursor      int
 }
 
 func newFileBrowser(startDir string) fileBrowserState {
@@ -500,8 +500,6 @@ func splitPathInput(raw string) (dir, prefix string) {
 	}
 	return raw[:idx], raw[idx+1:]
 }
-
-
 
 func (b fileBrowserState) view(width, height int) string {
 	debug.Log("browser.view: width=%d height=%d entries=%d cursor=%d selected=%d err=%q editing=%v",

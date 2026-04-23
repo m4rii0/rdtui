@@ -66,11 +66,11 @@ const (
 	actionBrowserEditComplete shortcutAction = "browser-edit-complete"
 	actionBrowserEditCancel   shortcutAction = "browser-edit-cancel"
 
-	actionPopupCancel shortcutAction = "popup-cancel"
-	actionPopupConfirm shortcutAction = "popup-confirm"
+	actionPopupCancel     shortcutAction = "popup-cancel"
+	actionPopupConfirm    shortcutAction = "popup-confirm"
 	actionToggleSelection shortcutAction = "toggle-selection"
-	actionSelectAll shortcutAction = "select-all"
-	actionClearSelection shortcutAction = "clear-selection"
+	actionSelectAll       shortcutAction = "select-all"
+	actionClearSelection  shortcutAction = "clear-selection"
 
 	actionOpenFile   shortcutAction = "open-file"
 	actionRevealFile shortcutAction = "reveal-file"

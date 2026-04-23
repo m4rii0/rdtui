@@ -77,10 +77,10 @@ func (s *Service) CompleteDeviceFlow(_ context.Context, _ models.DeviceCode) (*m
 	return s.Bootstrap(context.Background())
 }
 
-func (s *Service) SavePrivateToken(_ string) error { return nil }
+func (s *Service) SavePrivateToken(_ string) error  { return nil }
 func (s *Service) OpenFile(_ string) error          { return nil }
-func (s *Service) RevealInDirectory(_ string) error  { return nil }
-func (s *Service) Close() error                      { return nil }
+func (s *Service) RevealInDirectory(_ string) error { return nil }
+func (s *Service) Close() error                     { return nil }
 
 // ---------------------------------------------------------------------------
 // Torrent CRUD

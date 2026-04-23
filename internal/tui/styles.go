@@ -23,13 +23,13 @@ var (
 	appStyle = lipgloss.NewStyle().Padding(1, 2)
 
 	// Header / title
-	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
+	headStyle    = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
 	versionStyle = lipgloss.NewStyle().Foreground(colorMuted)
-	userStyle   = lipgloss.NewStyle().Foreground(colorViolet)
+	userStyle    = lipgloss.NewStyle().Foreground(colorViolet)
 
 	// Body text
-	textStyle  = lipgloss.NewStyle().Foreground(colorText)
-	mutedStyle = lipgloss.NewStyle().Foreground(colorMuted)
+	textStyle   = lipgloss.NewStyle().Foreground(colorText)
+	mutedStyle  = lipgloss.NewStyle().Foreground(colorMuted)
 	subtleStyle = lipgloss.NewStyle().Foreground(colorSubtle)
 
 	// Status
@@ -56,9 +56,9 @@ var (
 	matchHighlightStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAmber).Underline(true)
 
 	// Footer
-	footerKeyStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
-	footerDescStyle = lipgloss.NewStyle().Foreground(colorMuted)
-	footerSepStyle  = lipgloss.NewStyle().Foreground(colorSubtle)
+	footerKeyStyle     = lipgloss.NewStyle().Bold(true).Foreground(colorNeon)
+	footerDescStyle    = lipgloss.NewStyle().Foreground(colorMuted)
+	footerSepStyle     = lipgloss.NewStyle().Foreground(colorSubtle)
 	footerKeyDimStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorSubtle)
 	footerDescDimStyle = lipgloss.NewStyle().Foreground(colorSubtle)
 	selectedCountStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
@@ -121,7 +121,7 @@ func renderCompactHeader(version, username string) string {
 
 // sectionTitle renders a decorated section title: ◆ Title
 func sectionTitle(title string) string {
-	return headStyle.Render("◆ "+title)
+	return headStyle.Render("◆ " + title)
 }
 
 // dividerLine renders a full-width ── divider in subtle color.

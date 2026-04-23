@@ -263,8 +263,8 @@ func TestFilteredResultsRespectSortOrder(t *testing.T) {
 
 func TestVisibleTorrentsReturnsFullListWhenNoFilter(t *testing.T) {
 	m := Model{
-		mode:       modeMain,
-		torrents:   []models.Torrent{{ID: "a"}, {ID: "b"}},
+		mode:     modeMain,
+		torrents: []models.Torrent{{ID: "a"}, {ID: "b"}},
 	}
 	vis := m.visibleTorrents()
 	if len(vis) != 2 {

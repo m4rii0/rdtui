@@ -8,8 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-
-
 func renderOverlay(termW, termH int, content string) string {
 	if termW <= 0 {
 		termW = 80

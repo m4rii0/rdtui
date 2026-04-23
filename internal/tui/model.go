@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/auth"
