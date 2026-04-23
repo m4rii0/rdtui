@@ -18,6 +18,7 @@ Set BorderRadius 10
 Set TypingSpeed 35ms
 
 Env RDTUI_DEMO "1"
+Env RDTUI_DEMO_DOWNLOAD_DURATION "4s"
 
 Hide
 Type "export PS1='$ ' && go build -o bin/rdtui ./cmd/rdtui && export PATH=$PWD/bin:$PATH && clear"
@@ -35,39 +36,17 @@ Type "m"
 Sleep 50ms
 Copy "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=KDE+Neon+User+Edition.iso"
 Paste
-Sleep 2s
+Sleep 1500ms
 Enter
 Wait+Screen /Added magnet/
 Sleep 1s
 
-# Filter to a torrent that needs file selection.
-Type "/"
-Sleep 200ms
-Type "Linux.Mint.22.1.Cinnamon"
-Enter
-Sleep 500ms
-
-# Select files for a waiting torrent.
-Type "s"
-Wait+Screen /Select Files/
-Sleep 700ms
-Space
-Sleep 350ms
-Space
-Sleep 350ms
-Enter
-Wait+Screen /Updated torrent file selection/
-Sleep 1s
-
-# Clear the active filter.
-Type "q"
-Sleep 500ms
-
-# Inspect a ready torrent.
+# Filter to a known downloaded torrent before opening details.
 Type "/"
 Sleep 200ms
 Type "Ubuntu.24.04.2.Desktop"
 Enter
+Wait+Screen /Ubuntu.24.04.2.Desktop/
 Sleep 500ms
 Enter
 Wait+Screen /Torrent Details/
@@ -79,22 +58,32 @@ Wait+Screen /Download/
 Sleep 700ms
 Enter
 Wait+Screen /Managed Download/
-Sleep 11s
+Sleep 5s
+Escape
+Sleep 500ms
 Escape
 Sleep 500ms
 Type "q"
 Sleep 500ms
 
-# Show batch selection without destructive actions.
+# Select three torrents in batch mode and delete them.
 Type "b"
 Sleep 500ms
 Space
+Sleep 250ms
+Down
+Space
+Sleep 250ms
 Down
 Space
 Sleep 1s
-Escape
-Sleep 500ms
+Type "x"
+Wait+Screen /Delete Torrents/
+Sleep 1s
+Enter
+Wait+Screen /Deleted 3 torrent/
+Sleep 1s
 
 Hide
 Type "q"
-Sleep 200ms
+Sleep 2s

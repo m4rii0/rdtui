@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
+const defaultDownloadDuration = 10 * time.Second
+
 // Service implements app.AppService with fully offline mock data.
 // All state lives in memory; nothing touches the network or disk.
 type Service struct {
@@ -19,8 +22,9 @@ type Service struct {
 	torrents []torrentEntry
 	nextID   int
 
-	activeDownload *models.ManagedDownload
-	downloadStart  time.Time
+	activeDownload   *models.ManagedDownload
+	downloadStart    time.Time
+	downloadDuration time.Duration
 }
 
 type torrentEntry struct {
@@ -29,7 +33,7 @@ type torrentEntry struct {
 }
 
 func NewService() *Service {
-	s := &Service{nextID: 100}
+	s := &Service{nextID: 100, downloadDuration: demoDownloadDuration()}
 	s.torrents = s.seedData()
 	return s
 }
@@ -252,9 +256,7 @@ func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownlo
 		return models.ManagedDownload{}, false, nil
 	}
 
-	elapsed := time.Since(s.downloadStart).Seconds()
-	// Simulate ~10 second download
-	progress := elapsed / 10.0
+	progress := time.Since(s.downloadStart).Seconds() / s.downloadDuration.Seconds()
 	if progress >= 1.0 {
 		progress = 1.0
 		s.activeDownload.Status = models.ManagedDownloadStatusComplete
@@ -267,6 +269,18 @@ func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownlo
 	}
 
 	return *s.activeDownload, true, nil
+}
+
+func demoDownloadDuration() time.Duration {
+	value := strings.TrimSpace(os.Getenv("RDTUI_DEMO_DOWNLOAD_DURATION"))
+	if value == "" {
+		return defaultDownloadDuration
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return defaultDownloadDuration
+	}
+	return duration
 }
 
 // ---------------------------------------------------------------------------
