@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -357,6 +358,29 @@ func TestFilterTorrentsWithMatches(t *testing.T) {
 	}
 	if len(results[0].indices) == 0 {
 		t.Fatal("expected non-empty match indices")
+	}
+}
+
+func TestSelectedSearchMatchDoesNotLeakANSICodes(t *testing.T) {
+	torrent := models.Torrent{
+		ID:       "1",
+		Filename: "Big Buck Bunny",
+		Status:   "downloaded",
+		Added:    time.Date(2026, 4, 15, 10, 30, 0, 0, time.UTC),
+	}
+	matchStr := torrentMatchString(torrent)
+	filenameOffset := strings.Index(matchStr, torrent.Filename)
+	if filenameOffset < 0 {
+		t.Fatalf("match string %q missing filename", matchStr)
+	}
+
+	row := renderTableRow(torrent, tableColumns(100, false), []int{filenameOffset}, true)
+	plain := ansi.Strip(row)
+	if strings.Contains(plain, "38;5;") || strings.Contains(plain, "48;5;") {
+		t.Fatalf("rendered row leaked ANSI parameters: %q", plain)
+	}
+	if !strings.Contains(plain, torrent.Filename) {
+		t.Fatalf("rendered row = %q, want filename %q", plain, torrent.Filename)
 	}
 }
 

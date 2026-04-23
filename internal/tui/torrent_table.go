@@ -202,11 +202,11 @@ func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices [
 			}
 		case colName:
 			value = torrent.Filename
-			if selected {
-				value = selectedStyle.Render(value)
-			}
 			if fm != nil {
 				value = highlightChars(value, fm[colName], matchHighlightStyle)
+			}
+			if selected {
+				value = selectedStyle.Render(value)
 			}
 		}
 		cells[i] = padVisual(value, col.Width, col.AlignRight)
