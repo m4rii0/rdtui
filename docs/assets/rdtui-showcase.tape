@@ -52,11 +52,8 @@ Enter
 Wait+Screen /Torrent Details/
 Sleep 1s
 
-# Start a managed download from the same ready torrent.
+# Start a managed download from the same ready torrent (single file, skips picker).
 Type "d"
-Wait+Screen /Download/
-Sleep 700ms
-Enter
 Wait+Screen /Managed Download/
 Sleep 5s
 Escape

@@ -1227,6 +1227,17 @@ func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 		m.errText = "No downloadable links available"
 		return *m, nil
 	}
+	if len(targets) == 1 {
+		if action == handoffDownload {
+			if m.detail != nil {
+				m.downloadTorrentID = m.detail.ID
+			}
+			m.loading = true
+			return *m, resolveDownloadCmd(m.service, targets[0])
+		}
+		m.loading = true
+		return *m, handoffCmd(m.service, targets[0])
+	}
 	m.targets = targetPickerState{Items: targets, Action: action}
 	m.mode = modeChooseTarget
 	return *m, nil
