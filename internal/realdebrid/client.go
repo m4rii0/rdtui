@@ -182,8 +182,15 @@ func (c *Client) AddMagnet(ctx context.Context, magnet string) (models.AddTorren
 	values := url.Values{}
 	values.Set("magnet", magnet)
 	var out models.AddTorrentResult
-	err := c.doJSON(ctx, http.MethodPost, c.baseURL+"/torrents/addMagnet", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &out)
-	return out, err
+	resp, err := c.do(ctx, http.MethodPost, c.baseURL+"/torrents/addMagnet", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if err := c.decodeResponse(resp, &out, http.StatusCreated); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byte) (models.AddTorrentResult, error) {

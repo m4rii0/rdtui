@@ -95,6 +95,39 @@ func TestClientTorrentInfoParsesFloatProgressResponse(t *testing.T) {
 	}
 }
 
+func TestClientAddMagnetAcceptsCreatedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/torrents/addMagnet" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-123" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.Contains(got, "application/x-www-form-urlencoded") {
+			t.Fatalf("content-type = %q", got)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if got := string(body); got != "magnet=magnet%3A%3Fxt%3Durn%3Abtih%3Aabc%26tr%3Dudp%3A%2F%2Ftracker.example%2Fannounce" {
+			t.Fatalf("body = %q", got)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"D6YQSTIYHWEJC","uri":"https://api.real-debrid.com/rest/1.0/torrents/info/D6YQSTIYHWEJC"}`)
+	}))
+	defer server.Close()
+
+	client := NewClient("token-123", server.URL, server.URL)
+	result, err := client.AddMagnet(context.Background(), "magnet:?xt=urn:btih:abc&tr=udp://tracker.example/announce")
+	if err != nil {
+		t.Fatalf("AddMagnet() error = %v", err)
+	}
+	if result.ID != "D6YQSTIYHWEJC" {
+		t.Fatalf("id = %q, want D6YQSTIYHWEJC", result.ID)
+	}
+}
+
 func TestClientUnrestrictLinkUsesFormData(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/unrestrict/link" {
