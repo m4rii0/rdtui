@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/m4rii0/rdtui/internal/version"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -195,11 +196,10 @@ func (c *Client) AddMagnet(ctx context.Context, magnet string) (models.AddTorren
 
 func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byte) (models.AddTorrentResult, error) {
 	var out models.AddTorrentResult
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/torrents/addTorrent", bytes.NewReader(data))
+	req, err := c.newRequest(ctx, http.MethodPut, c.baseURL+"/torrents/addTorrent", bytes.NewReader(data))
 	if err != nil {
 		return out, err
 	}
-	c.authorize(req)
 	contentType := "application/x-bittorrent"
 	if extType := mime.TypeByExtension(filepath.Ext(filename)); extType != "" {
 		contentType = extType
@@ -368,15 +368,32 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Re
 }
 
 func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader, contentType string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	req, err := c.newRequest(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	c.authorize(req)
 	return c.httpClient.Do(req)
+}
+
+func (c *Client) newRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent())
+	c.authorize(req)
+	return req, nil
+}
+
+func userAgent() string {
+	appVersion := strings.TrimSpace(version.Version)
+	if appVersion == "" {
+		appVersion = "dev"
+	}
+	return "rdtui/" + appVersion
 }
 
 func (c *Client) authorize(req *http.Request) {

@@ -8,12 +8,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/m4rii0/rdtui/internal/version"
 )
 
 func TestClientUserSuccess(t *testing.T) {
+	setTestVersion(t, "1.2.3")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer token-123" {
 			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != "rdtui/1.2.3" {
+			t.Fatalf("unexpected user-agent header: %q", got)
 		}
 		if r.URL.Path != "/user" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -128,6 +135,34 @@ func TestClientAddMagnetAcceptsCreatedResponse(t *testing.T) {
 	}
 }
 
+func TestClientAddTorrentFileSetsUserAgent(t *testing.T) {
+	setTestVersion(t, "1.2.3")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/torrents/addTorrent" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if got := r.Header.Get("User-Agent"); got != "rdtui/1.2.3" {
+			t.Fatalf("unexpected user-agent header: %q", got)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"D6YQSTIYHWEJC","uri":"https://api.real-debrid.com/rest/1.0/torrents/info/D6YQSTIYHWEJC"}`)
+	}))
+	defer server.Close()
+
+	client := NewClient("token-123", server.URL, server.URL)
+	result, err := client.AddTorrentFile(context.Background(), "example.torrent", []byte("torrent data"))
+	if err != nil {
+		t.Fatalf("AddTorrentFile() error = %v", err)
+	}
+	if result.ID != "D6YQSTIYHWEJC" {
+		t.Fatalf("id = %q, want D6YQSTIYHWEJC", result.ID)
+	}
+}
+
 func TestClientUnrestrictLinkUsesFormData(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/unrestrict/link" {
@@ -186,4 +221,13 @@ func TestClientReturnsAPIErrorOnRateLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), "Too many requests") {
 		t.Fatalf("error = %v, want API message", err)
 	}
+}
+
+func setTestVersion(t *testing.T, value string) {
+	t.Helper()
+	previous := version.Version
+	version.Version = value
+	t.Cleanup(func() {
+		version.Version = previous
+	})
 }
