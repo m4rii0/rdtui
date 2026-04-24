@@ -94,6 +94,26 @@ To check the embedded version:
 rdtui --version
 ```
 
+To check whether a newer stable GitHub release is available:
+
+```bash
+rdtui check-update
+```
+
+To explicitly update a released binary:
+
+```bash
+rdtui update
+```
+
+Preview the update action without replacing files:
+
+```bash
+rdtui update --dry-run
+```
+
+Self-update is explicit only: normal TUI startup does not check for or install updates. The updater performs a SHA256 integrity check against `checksums.txt` before install; use the Sigstore commands above when you need release authenticity verification. Windows builds download and verify the replacement executable, then print manual replacement instructions.
+
 On first run the app will ask you to authenticate.
 
 ## Authentication

@@ -244,7 +244,7 @@ func NewModel(service app.AppService) Model {
 	)
 	return Model{
 		service:       service,
-		version:       version.Version,
+		version:       version.Current(),
 		mode:          modeStarting,
 		returnMode:    modeMain,
 		downloadDir:   modelDownloadDir(service),

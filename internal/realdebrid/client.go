@@ -389,7 +389,7 @@ func (c *Client) newRequest(ctx context.Context, method, endpoint string, body i
 }
 
 func userAgent() string {
-	appVersion := strings.TrimSpace(version.Version)
+	appVersion := strings.TrimSpace(version.Current())
 	if appVersion == "" {
 		appVersion = "dev"
 	}
