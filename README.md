@@ -18,12 +18,17 @@ All code, opinions, design decisions, and documentation in this repository are m
 
 - Authenticate with Real-Debrid via device auth or private API token
 - Browse and manage your active torrent list
+- Open a detail view for individual torrents (files, seeders, speed, progress)
 - Add torrents via magnet links, remote `.torrent` URLs, or local `.torrent` file imports (including batch imports)
 - Select files for torrents awaiting file selection
 - Resolve ready torrents to direct download URLs and copy them to the clipboard
 - Download resolved links locally using the built-in HTTP downloader or an app-managed `aria2c` session
 - Monitor in-progress downloads with a live progress screen, with options to open the completed file, reveal it in its directory, or delete the source torrent
+- Fuzzy search and filter torrents
+- Sort torrents by status, progress, size, date, or name
+- Batch operations: select multiple torrents to delete or copy URLs in bulk
 - Delete torrents
+- Built-in help overlay listing all available shortcuts
 
 ## Requirements
 
@@ -46,6 +51,14 @@ rdtui
 ## Build
 
 ```bash
+make build
+```
+
+This compiles the binary to `bin/rdtui` and embeds the current git version via ldflags.
+
+For a plain build without version info:
+
+```bash
 go build ./cmd/rdtui
 ```
 
@@ -53,6 +66,18 @@ go build ./cmd/rdtui
 
 ```bash
 go run ./cmd/rdtui
+```
+
+Or after building:
+
+```bash
+./bin/rdtui
+```
+
+To check the embedded version:
+
+```bash
+rdtui --version
 ```
 
 On first run the app will ask you to authenticate.
@@ -125,8 +150,10 @@ This file is created automatically when device auth succeeds.
 
 Once authenticated, the main screen shows a master-detail torrent workbench.
 
-Key bindings:
+Key bindings (main view):
 - `j` / `k`: move between torrents
+- `enter`: open torrent detail view
+- `/`: search and filter torrents (fuzzy match)
 - `r`: refresh torrents
 - `m`: add a magnet link
 - `u`: add a remote `.torrent` URL
@@ -135,7 +162,30 @@ Key bindings:
 - `y`: resolve a ready torrent target to a direct URL and show or copy it
 - `d`: resolve a ready torrent target and start a local download using the configured `download_backend`
 - `x`: delete the selected torrent
-- `q`: quit
+- `b`: enter batch mode (select multiple torrents)
+- `S` / `P` / `Z` / `D` / `N`: sort by status / progress / size / date / name
+- `?`: toggle help overlay
+- `q`: quit (or clear active filter)
+
+Batch mode (`b`):
+- `space`: mark/unmark torrent
+- `ctrl+a`: select all, `ctrl+d`: clear selection
+- `x`: delete marked torrents
+- `y`: copy URLs for marked torrents
+- `b` / `esc`: exit batch mode
+
+Detail view (`enter`):
+- `s`: select files (when applicable)
+- `y`: copy URL, `d`: download, `x`: delete, `r`: refresh
+- `i`: import a `.torrent` file
+- `esc`: back to main view
+
+Download progress view (`d`):
+- `r`: refresh progress
+- `o`: open completed file
+- `s`: reveal file in directory
+- `x`: delete source torrent
+- `esc`: back to main view
 
 ### Managed Download
 
