@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -24,6 +25,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+
+      - name: Setup cosign
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Verify
         run: make verify VERSION="${GITHUB_REF_NAME}"
@@ -45,14 +49,28 @@ jobs:
           cd bin
           sha256sum rdtui-* > checksums.txt
 
+      - name: Sign checksums
+        run: |
+          cosign sign-blob \
+            --yes \
+            --bundle bin/checksums.txt.sigstore.json \
+            bin/checksums.txt
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" bin/rdtui-* bin/checksums.txt --clobber
+            gh release upload "${GITHUB_REF_NAME}" \
+              bin/rdtui-* \
+              bin/checksums.txt \
+              bin/checksums.txt.sigstore.json \
+              --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" bin/rdtui-* bin/checksums.txt \
+            gh release create "${GITHUB_REF_NAME}" \
+              bin/rdtui-* \
+              bin/checksums.txt \
+              bin/checksums.txt.sigstore.json \
               --title "${GITHUB_REF_NAME}" \
               --notes "Release ${GITHUB_REF_NAME}"
           fi

@@ -48,6 +48,20 @@ Then run:
 rdtui
 ```
 
+### Verify Release Assets
+
+GitHub release checksums are signed in CI with keyless Sigstore signing. To verify a downloaded release, run these commands from the directory containing the release assets:
+
+```bash
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/m4rii0/rdtui/\.github/workflows/release\.yml@refs/tags/v.*$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+sha256sum --check checksums.txt
+```
+
 ## Build
 
 ```bash
