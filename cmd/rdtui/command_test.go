@@ -47,6 +47,18 @@ func TestCobraCommandVersion(t *testing.T) {
 	}
 }
 
+func TestCobraMousetrapDisabled(t *testing.T) {
+	original := cobra.MousetrapHelpText
+	t.Cleanup(func() { cobra.MousetrapHelpText = original })
+	cobra.MousetrapHelpText = "trap"
+
+	_ = testRootCommand(commandHandlers{})
+
+	if cobra.MousetrapHelpText != "" {
+		t.Fatalf("MousetrapHelpText = %q, want disabled", cobra.MousetrapHelpText)
+	}
+}
+
 func TestCobraCommandCheckUpdate(t *testing.T) {
 	var called bool
 	cmd := testRootCommand(commandHandlers{

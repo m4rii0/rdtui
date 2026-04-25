@@ -23,6 +23,10 @@ type commandHandlers struct {
 var errUsage = errors.New("usage error")
 
 func newRootCommand(ctx context.Context, stdout io.Writer, handlers commandHandlers) *cobra.Command {
+	// Cobra's Windows mousetrap exits with a CLI-only prompt when launched from Explorer.
+	// rdtui supports direct launch into the TUI, so keep that guard disabled.
+	cobra.MousetrapHelpText = ""
+
 	var showVersion bool
 	var updateOpts updateOptions
 
