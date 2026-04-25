@@ -107,6 +107,7 @@ type Model struct {
 	filteredTorrents []models.Torrent
 	selectedIdx      int
 	detail           *models.TorrentInfo
+	pendingFocusID   string
 	sortColumn       int
 	sortAscending    bool
 	filterApplied    bool
@@ -373,7 +374,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filterApplied || m.mode == modeSearch {
 			m.applyFilter()
 		}
-		m.selectedIdx = selectedIndexForID(m.visibleTorrents(), selectedID)
+		vis := m.visibleTorrents()
+		if m.pendingFocusID != "" {
+			if idx, ok := torrentIndexForID(vis, m.pendingFocusID); ok {
+				m.selectedIdx = idx
+				m.pendingFocusID = ""
+			} else {
+				m.selectedIdx = selectedIndexForID(vis, selectedID)
+			}
+		} else {
+			m.selectedIdx = selectedIndexForID(vis, selectedID)
+		}
 		m.errText = ""
 		if len(m.torrents) == 0 {
 			m.detail = nil
@@ -407,6 +418,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeMain
 		m.status = fmt.Sprintf("Added %s (%s)", msg.label, msg.result.ID)
+		m.pendingFocusID = msg.result.ID
 		m.errText = ""
 		return m, refreshCmd(m.service)
 
@@ -416,13 +428,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		success := 0
 		failed := 0
 		failedNames := []string{}
+		focusID := ""
 		for _, result := range msg.results {
 			if result.OK() {
 				success++
+				if focusID == "" {
+					focusID = result.TorrentID
+				}
 			} else {
 				failed++
 				failedNames = append(failedNames, filepathBase(result.Source))
 			}
+		}
+		if focusID != "" {
+			m.pendingFocusID = focusID
 		}
 		if failed == 0 {
 			m.status = fmt.Sprintf("Imported %d torrent file(s)", success)
@@ -1612,12 +1631,22 @@ func selectedIndexForID(torrents []models.Torrent, id string) int {
 	if len(torrents) == 0 {
 		return 0
 	}
-	for idx, torrent := range torrents {
-		if torrent.ID == id {
-			return idx
-		}
+	if idx, ok := torrentIndexForID(torrents, id); ok {
+		return idx
 	}
 	return 0
+}
+
+func torrentIndexForID(torrents []models.Torrent, id string) (int, bool) {
+	if id == "" {
+		return 0, false
+	}
+	for idx, torrent := range torrents {
+		if torrent.ID == id {
+			return idx, true
+		}
+	}
+	return 0, false
 }
 
 func fallbackModeForInput(action inputAction) mode {

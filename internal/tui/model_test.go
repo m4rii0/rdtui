@@ -143,6 +143,98 @@ func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
 	}
 }
 
+func TestAddTorrentFocusesNewTorrentAfterRefresh(t *testing.T) {
+	m := Model{
+		mode:          modeURLInput,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+	}
+
+	updated, cmd := m.Update(addTorrentMsg{result: models.AddTorrentResult{ID: "new"}, label: "remote torrent URL"})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected refresh command after adding torrent")
+	}
+	if m.pendingFocusID != "new" {
+		t.Fatalf("pendingFocusID = %q, want new", m.pendingFocusID)
+	}
+
+	updated, cmd = m.Update(torrentsMsg{torrents: []models.Torrent{
+		{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "new", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+	}})
+	m = updated.(Model)
+	if got := m.selectedTorrentID(); got != "new" {
+		t.Fatalf("selected torrent = %q, want new", got)
+	}
+	if m.pendingFocusID != "" {
+		t.Fatalf("pendingFocusID = %q, want cleared", m.pendingFocusID)
+	}
+	if cmd == nil {
+		t.Fatal("expected detail command for focused torrent")
+	}
+}
+
+func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
+	m := Model{
+		mode:          modeFileBrowser,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx: 0,
+	}
+
+	updated, cmd := m.Update(importMsg{results: []models.ImportResult{{Source: "movie.torrent", TorrentID: "new"}}})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected refresh command after importing torrent")
+	}
+	if m.pendingFocusID != "new" {
+		t.Fatalf("pendingFocusID = %q, want new", m.pendingFocusID)
+	}
+
+	updated, _ = m.Update(torrentsMsg{torrents: []models.Torrent{
+		{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "new", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+	}})
+	m = updated.(Model)
+	if got := m.selectedTorrentID(); got != "new" {
+		t.Fatalf("selected torrent = %q, want new", got)
+	}
+	if m.pendingFocusID != "" {
+		t.Fatalf("pendingFocusID = %q, want cleared", m.pendingFocusID)
+	}
+}
+
+func TestPendingFocusWaitsUntilTorrentAppears(t *testing.T) {
+	m := Model{
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		},
+		selectedIdx:    0,
+		pendingFocusID: "new",
+	}
+
+	updated, _ := m.Update(torrentsMsg{torrents: []models.Torrent{
+		{ID: "old", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+	}})
+	m = updated.(Model)
+	if got := m.selectedTorrentID(); got != "old" {
+		t.Fatalf("selected torrent = %q, want old", got)
+	}
+	if m.pendingFocusID != "new" {
+		t.Fatalf("pendingFocusID = %q, want new", m.pendingFocusID)
+	}
+}
+
 func TestStatusRankOrdering(t *testing.T) {
 	ranks := map[string]int{
 		"downloading":             0,
