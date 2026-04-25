@@ -174,6 +174,20 @@ func TestFootersMentionManagedDownload(t *testing.T) {
 	}
 }
 
+func TestVersionRenderersDoNotPrefixEmbeddedTag(t *testing.T) {
+	for name, got := range map[string]string{
+		"banner":        ansi.Strip(renderBanner("v1.2.3")),
+		"compactHeader": ansi.Strip(renderCompactHeader("v1.2.3", "")),
+	} {
+		if strings.Contains(got, "vv1.2.3") {
+			t.Fatalf("%s rendered duplicate version prefix: %q", name, got)
+		}
+		if !strings.Contains(got, "v1.2.3") {
+			t.Fatalf("%s = %q, want embedded version", name, got)
+		}
+	}
+}
+
 func TestListFooterDimsUnavailableActions(t *testing.T) {
 	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
 	got := ansi.Strip(listFooter(m))
