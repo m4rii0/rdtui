@@ -1,18 +1,59 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  prepare:
+    name: Calculate next version
+    runs-on: ubuntu-24.04
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Calculate next version
+        id: version
+        run: |
+          latest_tag="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          if [ -z "$latest_tag" ]; then
+            latest_tag="v0.0.0"
+          fi
+          latest="${latest_tag#v}"
+
+          IFS='.' read -r major minor patch <<< "$latest"
+
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          new_version="v${major}.${minor}.${patch}"
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+          printf 'Next version: %s (bumping %s from %s)\n' "$new_version" "${{ inputs.bump }}" "$latest_tag"
+
   release:
     name: Build release assets
     runs-on: ubuntu-24.04
+    needs: prepare
+    environment: release
+    env:
+      NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
 
     steps:
       - name: Checkout
@@ -29,16 +70,21 @@ jobs:
       - name: Setup cosign
         uses: sigstore/cosign-installer@v4.1.1
 
+      - name: Tag release
+        run: |
+          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+          git push origin "${NEW_VERSION}"
+
       - name: Verify
-        run: make verify VERSION="${GITHUB_REF_NAME}"
+        run: make verify VERSION="${NEW_VERSION}"
 
       - name: Build release binaries
-        run: make clean build-all VERSION="${GITHUB_REF_NAME}"
+        run: make clean build-all VERSION="${NEW_VERSION}"
 
       - name: Verify embedded version
         run: |
           version_output="$(./bin/rdtui-linux-amd64 --version)"
-          expected="rdtui ${GITHUB_REF_NAME}"
+          expected="rdtui ${NEW_VERSION}"
           if [ "$version_output" != "$expected" ]; then
             printf 'expected %s, got %s\n' "$expected" "$version_output"
             exit 1
@@ -60,17 +106,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" \
+          if gh release view "${NEW_VERSION}" >/dev/null 2>&1; then
+            gh release upload "${NEW_VERSION}" \
               bin/rdtui-* \
               bin/checksums.txt \
               bin/checksums.txt.sigstore.json \
               --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            gh release create "${NEW_VERSION}" \
               bin/rdtui-* \
               bin/checksums.txt \
               bin/checksums.txt.sigstore.json \
-              --title "${GITHUB_REF_NAME}" \
-              --notes "Release ${GITHUB_REF_NAME}"
+              --title "${NEW_VERSION}" \
+              --notes "Release ${NEW_VERSION}"
           fi
