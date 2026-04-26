@@ -27,6 +27,7 @@ All code, opinions, design decisions, and documentation in this repository are m
 - Fuzzy search and filter torrents
 - Sort torrents by status, progress, size, date, or name
 - Batch operations: select multiple torrents to delete, copy URLs, or download completed torrents in bulk
+- Explicit self-update: check for newer stable releases and install them from GitHub (`rdtui check-update`, `rdtui update`)
 - Delete torrents
 - Built-in help overlay listing all available shortcuts
 
@@ -228,9 +229,11 @@ Press `d` on a ready torrent to resolve the selected target and start a managed 
 
 If target file already exists in `default_download_dir`, `rdtui` pauses first and asks whether you want to download it again, showing current local size and size difference when remote size is known.
 
-In batch mode, press `d` after marking at least two completed torrents to create a bulk download queue. The queue defaults to the current table order, lets you reorder torrents, asks which files to download when a torrent has multiple downloadable files, and asks for final confirmation before starting. Bulk downloads run sequentially and continue after individual failures; the summary reports completed, failed, skipped, and partial results.
+In batch mode, press `d` after marking at least two completed torrents to create a bulk download queue. The `d` shortcut is dimmed when fewer than two marked torrents are `downloaded`. The queue defaults to the current table order, lets you reorder torrents, asks which files to download when a torrent has multiple downloadable files (single-target torrents are auto-selected), and asks for final confirmation before starting. Bulk downloads run sequentially and continue after individual failures; the summary reports completed, failed, skipped, and partial results. If a target file already exists in the download directory, you are asked whether to re-download it before that file's download starts.
 
-After a bulk download finishes, press `x` from the bulk summary to clean up source torrents. Fully successful torrents are pre-selected for deletion, while failed or partial torrents are left unselected by default but can be toggled manually before confirmation.
+During an active bulk download, the queue view highlights the current item and keeps it visible as the queue advances. Pressing `esc` returns to the torrent list while the queue continues in the background.
+
+After a bulk download finishes, press `x` from the bulk summary to clean up source torrents. Fully successful torrents are pre-selected for deletion, while failed or partial torrents are left unselected by default but can be toggled manually. Selecting incomplete torrents triggers a warning before confirmation.
 
 When `download_backend` is `aria2`, `rdtui` starts its own loopback-only `aria2c` RPC session for the download.
 
