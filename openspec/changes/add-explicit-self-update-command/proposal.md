@@ -6,7 +6,7 @@
 
 - Add an explicit update-check command that reports whether a newer stable GitHub release is available.
 - Add an explicit update command that downloads the current platform's release asset, verifies it against `checksums.txt` using SHA256, and installs it when supported.
-- Refuse self-update for `dev` or invalid embedded versions because update comparison requires a valid released semver tag.
+- Refuse self-update for `dev` or invalid embedded versions while allowing tagged dirty local builds such as `v1.2.3+dirty` to compare as their stable SemVer core.
 - Use GitHub's latest release endpoint, which excludes draft and prerelease releases by default.
 - Replace the running executable on Unix-like platforms when safe; on Windows, download and verify the replacement and provide manual replacement instructions for the first pass.
 - Prepare command parsing so updater commands and one or more updater flags are handled separately from the normal TUI startup path.

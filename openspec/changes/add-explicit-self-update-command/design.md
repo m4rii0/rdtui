@@ -46,11 +46,11 @@ Rationale: the existing release workflow already publishes all required assets t
 
 Alternative considered: add a custom update manifest. Rejected for v1 because it would duplicate information already available from GitHub and introduce another release artifact to maintain.
 
-### Compare released semver tags only
+### Compare stable semver versions plus dirty local metadata
 
-The updater will require the current embedded version and latest release tag to be valid Go-style semver strings with a `v` prefix. `dev`, empty, dirty, or otherwise invalid versions will not self-update.
+The updater will require the current embedded version and latest release tag to be valid Go-style semver strings with a `v` prefix. `dev`, empty, prerelease, non-`dirty` build metadata, or otherwise invalid versions will not self-update. Dirty local builds from a tagged commit are embedded as SemVer build metadata such as `v1.2.3+dirty` and are compared as `v1.2.3`.
 
-Rationale: self-update needs deterministic ordering. Builds produced by `go run`, local `make build` on untagged commits, or dirty working trees may not correspond to a published release asset.
+Rationale: self-update needs deterministic ordering. Builds produced by `go run` or local `make build` on untagged commits may not correspond to a published release asset. Tagged dirty builds still have a stable SemVer core, and `+dirty` build metadata keeps them comparable while clearly marking them as local builds.
 
 Alternative considered: allow any current version and update if a latest release exists. Rejected because it can surprise users running local builds and obscures downgrade/sidegrade behavior.
 
@@ -95,7 +95,7 @@ Alternative considered: always ask users to manually replace the binary. Rejecte
 
 - GitHub API/network failure -> Report the failure and leave the installed binary unchanged.
 - GitHub unauthenticated rate limits -> Use one latest-release request per explicit command and keep error messages clear; conditional requests can be added later if needed.
-- Invalid current version from local builds -> Refuse self-update and explain that only released versions can self-update.
+- Invalid current version from local builds -> Refuse self-update and explain that only released SemVer versions or tagged `+dirty` local builds can self-update.
 - Missing or renamed release asset -> Fail before download and identify the expected asset name.
 - Missing checksum or checksum mismatch -> Fail closed and leave the installed binary unchanged.
 - SHA256 checksums do not prove release authenticity if both binary and checksum assets are tampered with -> Document the distinction and keep embedded Sigstore verification as a follow-up hardening change.

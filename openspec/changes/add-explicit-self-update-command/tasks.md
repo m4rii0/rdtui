@@ -8,7 +8,7 @@
 ## 2. Release Discovery
 
 - [x] 2.1 Add an updater package for GitHub latest-release lookup using `https://api.github.com/repos/m4rii0/rdtui/releases/latest`.
-- [x] 2.2 Add version validation and comparison for released `v`-prefixed semver tags, refusing `dev`, empty, dirty, or invalid versions.
+- [x] 2.2 Add version validation and comparison for `v`-prefixed SemVer versions, refusing `dev`, empty, prerelease, unsupported build metadata, or invalid versions while allowing tagged `+dirty` local builds.
 - [x] 2.3 Add platform asset selection for supported `GOOS/GOARCH` combinations and clear failures for unsupported or missing assets.
 - [x] 2.4 Add tests for release response parsing, semver comparison, invalid current versions, and platform asset mapping.
 

@@ -20,6 +20,14 @@ func TestNormalizeReleasedVersion(t *testing.T) {
 		t.Fatalf("NormalizeReleasedVersion = %q, want v1.2.0", got)
 	}
 
+	got, err = NormalizeReleasedVersion("v1.2.3+dirty")
+	if err != nil {
+		t.Fatalf("NormalizeReleasedVersion returned error for dirty build: %v", err)
+	}
+	if got != "v1.2.3" {
+		t.Fatalf("NormalizeReleasedVersion dirty build = %q, want v1.2.3", got)
+	}
+
 	invalid := []string{"", "dev", "1.2.3", "v1.2.3-dirty", "v1.2.3+local"}
 	for _, version := range invalid {
 		if _, err := NormalizeReleasedVersion(version); err == nil {

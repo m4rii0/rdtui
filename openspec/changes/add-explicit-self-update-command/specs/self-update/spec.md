@@ -8,18 +8,22 @@ The application SHALL provide a `check-update` command that compares the current
 - **THEN** the application reports the current version, the latest version, and that an update is available
 
 #### Scenario: Current version is already latest
-- **WHEN** the user runs `rdtui check-update` from the latest stable released version
+- **WHEN** the user runs `rdtui check-update` from the latest stable released version or an equivalent tagged dirty local build
 - **THEN** the application reports that `rdtui` is up to date
 
+#### Scenario: Dirty local build can be compared
+- **WHEN** the user runs `rdtui check-update` from a tagged dirty local build such as `v1.2.3+dirty`
+- **THEN** the application compares the current version as `v1.2.3` and reports the appropriate update state
+
 #### Scenario: Current version cannot be compared
-- **WHEN** the user runs `rdtui check-update` from a `dev`, empty, or invalid embedded version
-- **THEN** the application refuses the check and explains that only released semver versions can be checked for self-update
+- **WHEN** the user runs `rdtui check-update` from a `dev`, empty, prerelease, unsupported build metadata, or invalid embedded version
+- **THEN** the application refuses the check and explains that only comparable semver versions can be checked for self-update
 
 ### Requirement: User can install a stable update explicitly
 The application SHALL provide an `update` command that downloads and installs a newer stable GitHub release only when the user explicitly invokes it.
 
 #### Scenario: Newer stable release installs on Unix-like platforms
-- **WHEN** the user runs `rdtui update` on a supported Unix-like platform from an older released version
+- **WHEN** the user runs `rdtui update` on a supported Unix-like platform from an older released version or tagged dirty local build
 - **THEN** the application downloads the matching release asset, verifies its SHA256 checksum, replaces the current executable, and reports the installed version
 
 #### Scenario: No update is available

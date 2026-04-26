@@ -15,7 +15,8 @@ func NormalizeReleasedVersion(value string) (string, error) {
 	if !semver.IsValid(version) {
 		return "", fmt.Errorf("version %q is not valid semver", value)
 	}
-	if semver.Prerelease(version) != "" || semver.Build(version) != "" {
+	build := semver.Build(version)
+	if semver.Prerelease(version) != "" || (build != "" && build != "+dirty") {
 		return "", fmt.Errorf("version %q is not a stable released version", value)
 	}
 	canonical := semver.Canonical(version)
