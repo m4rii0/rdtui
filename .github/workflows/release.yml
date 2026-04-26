@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.bump }} bump
 
 on:
   workflow_dispatch:
@@ -46,6 +47,15 @@ jobs:
           new_version="v${major}.${minor}.${patch}"
           echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
           printf 'Next version: %s (bumping %s from %s)\n' "$new_version" "${{ inputs.bump }}" "$latest_tag"
+
+          {
+            printf '## 🚀 Release Version\n\n'
+            printf '| Field | Value |\n'
+            printf '|-------|-------|\n'
+            printf '| Previous | `%s` |\n' "$latest_tag"
+            printf '| Bump type | `%s` |\n' "${{ inputs.bump }}"
+            printf '| **New version** | **`%s`** |\n' "$new_version"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Build release assets
