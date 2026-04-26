@@ -1039,9 +1039,10 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 
 func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 	m := Model{
-		mode:     modeBulkDownload,
-		download: &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
-		bulk:     newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+		mode:        modeBulkDownload,
+		downloadDir: t.TempDir(),
+		download:    &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
+		bulk:        newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
 	}
 	m.bulk.Items = []bulkQueueItem{
 		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
@@ -1080,5 +1081,35 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 	}
 	if m.bulk.Items[0].Status != bulkFileSuccess || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
 		t.Fatalf("bulk state = current %d items %+v", m.bulk.Current, m.bulk.Items)
+	}
+
+	updated, cmd = m.Update(resolvedDownloadMsg{url: "https://example.com/b", filename: "b.mkv", filesize: 100})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected command to start resolved background bulk item")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want resolved background item to preserve modeMain", m.mode)
+	}
+
+	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected polling command after background managed download starts")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want background managed download start to preserve modeMain", m.mode)
+	}
+
+	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command after background queue finishes")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want finished background queue to preserve modeMain", m.mode)
+	}
+	if !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess {
+		t.Fatalf("bulk state after background completion = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 }

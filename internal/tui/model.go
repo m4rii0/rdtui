@@ -598,13 +598,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case managedDownloadMsg:
 		m.loading = false
 		if m.returnMode == modeBulkDownload && m.bulk != nil {
+			foreground := m.mode == modeBulkDownload || m.mode == modeBulkConfirm
 			if msg.err != nil {
 				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
 				return m.startNextBulkItem()
 			}
 			download := msg.result.Download
 			m.download = &download
-			m.mode = modeBulkDownload
+			if foreground {
+				m.mode = modeBulkDownload
+			}
 			m.errText = ""
 			if msg.result.Reused {
 				m.status = "Reopened active bulk download: " + download.Filename
