@@ -83,6 +83,15 @@ The application SHALL process bulk download files one at a time using the config
 - **WHEN** the user declines to download an existing file again during bulk queue execution
 - **THEN** the application records that queued file as skipped and continues with the next queued file if one remains
 
+#### Scenario: Active queue shows movement
+- **WHEN** a bulk download queue is running
+- **THEN** the application shows a bounded queue list with completed, active, failed, skipped, and pending file rows
+- **AND** the active row remains visible as the queue advances through files
+
+#### Scenario: User can leave active bulk download view
+- **WHEN** a bulk download queue is running and the user presses `esc` from the bulk download view
+- **THEN** the application returns to the torrent list and keeps advancing the bulk download queue in the background
+
 ### Requirement: Bulk download summary reports all outcomes
 The application SHALL show a finished bulk download summary that reports successful, failed, partial, and skipped outcomes after the queue has no remaining files.
 

@@ -15,8 +15,10 @@ const (
 
 	actionQuit shortcutAction = "quit"
 
-	actionMoveUp   shortcutAction = "move-up"
-	actionMoveDown shortcutAction = "move-down"
+	actionMoveUp       shortcutAction = "move-up"
+	actionMoveDown     shortcutAction = "move-down"
+	actionMoveItemUp   shortcutAction = "move-item-up"
+	actionMoveItemDown shortcutAction = "move-item-down"
 
 	actionOpenDetail shortcutAction = "open-detail"
 	actionOpenSearch shortcutAction = "open-search"

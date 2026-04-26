@@ -78,9 +78,28 @@ func (m Model) canDeleteManagedDownloadTorrent() bool {
 	return m.download != nil && m.download.IsComplete() && m.downloadTorrentID != ""
 }
 
+func (m Model) canBulkDownloadSelection() bool {
+	if !m.batchMode || len(m.batchSelected) < 2 {
+		return false
+	}
+	selected := 0
+	for _, torrent := range m.visibleTorrents() {
+		if !m.batchSelected[torrent.ID] {
+			continue
+		}
+		selected++
+		if torrent.Status != "downloaded" {
+			return false
+		}
+	}
+	return selected >= 2
+}
+
 func (m Model) canShowHelp() bool {
 	switch m.mode {
-	case modeMain, modeDetail, modeDownload, modeSelectFiles, modeChooseTarget:
+	case modeMain, modeDetail, modeDownload, modeBulkDownload,
+		modeSelectFiles, modeChooseTarget, modeBulkOrder, modeBulkFiles,
+		modeBulkConfirm, modeBulkCleanup:
 		return true
 	case modeFileBrowser:
 		return !m.browser.EditingPath

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -841,5 +842,243 @@ func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
 	}
 	if m.errText != "Selected torrent is not ready to download" {
 		t.Fatalf("errText = %q, want inline unavailable-action error", m.errText)
+	}
+}
+
+func TestBulkDownloadEligibilityRequiresTwoDownloadedSelections(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "ready", Status: "downloaded", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "b", Filename: "queued", Status: "queued", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+		},
+		batchSelected: map[string]bool{"a": true, "b": true},
+	}
+
+	if m.canBulkDownloadSelection() {
+		t.Fatal("expected mixed-status selection to be ineligible")
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command for ineligible bulk download")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain", m.mode)
+	}
+	if !strings.Contains(m.errText, "Mark at least two downloaded") {
+		t.Fatalf("errText = %q, want eligibility error", m.errText)
+	}
+}
+
+func TestBulkDownloadStartsInVisibleOrder(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "b", Filename: "second", Status: "downloaded", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+			{ID: "a", Filename: "first", Status: "downloaded", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "c", Filename: "third", Status: "downloaded", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
+		},
+		batchSelected: map[string]bool{"a": true, "b": true},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected setup to open without async command")
+	}
+	if m.mode != modeBulkOrder {
+		t.Fatalf("mode = %q, want modeBulkOrder", m.mode)
+	}
+	if len(m.bulk.Plans) != 2 || m.bulk.Plans[0].ID != "b" || m.bulk.Plans[1].ID != "a" {
+		t.Fatalf("bulk order = %+v, want visible order [b a]", m.bulk.Plans)
+	}
+}
+
+func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
+	m := Model{
+		mode: modeBulkOrder,
+		bulk: newBulkDownloadState([]models.Torrent{
+			{ID: "a", Filename: "single"},
+			{ID: "b", Filename: "multi"},
+		}),
+	}
+
+	updated, _ := m.Update(bulkDetailsMsg{details: []models.TorrentInfo{
+		{Torrent: models.Torrent{ID: "a", Filename: "single", Links: []string{"https://example.com/a"}}, Files: []models.TorrentFile{{ID: 1, Path: "a.mkv", Selected: true}}},
+		{Torrent: models.Torrent{ID: "b", Filename: "multi", Links: []string{"https://example.com/b1", "https://example.com/b2"}}, Files: []models.TorrentFile{{ID: 1, Path: "b1.mkv", Selected: true}, {ID: 2, Path: "b2.mkv", Selected: true}}},
+	}})
+	m = updated.(Model)
+	if m.mode != modeBulkFiles {
+		t.Fatalf("mode = %q, want modeBulkFiles", m.mode)
+	}
+
+	m.bulk.clearCurrentFiles()
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.mode != modeBulkFiles {
+		t.Fatalf("mode = %q, want to stay in modeBulkFiles", m.mode)
+	}
+	if m.errText != "Select at least one file" {
+		t.Fatalf("errText = %q, want empty selection error", m.errText)
+	}
+
+	m.bulk.toggleCurrentFile()
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.mode != modeBulkConfirm {
+		t.Fatalf("mode = %q, want modeBulkConfirm", m.mode)
+	}
+	if len(m.bulk.Items) != 2 {
+		t.Fatalf("items len = %d, want single target plus selected multi target", len(m.bulk.Items))
+	}
+}
+
+func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
+	m := Model{
+		mode:          modeBulkConfirm,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true, "b": true},
+		bulk: newBulkDownloadState([]models.Torrent{
+			{ID: "a", Filename: "a"},
+			{ID: "b", Filename: "b"},
+		}),
+	}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFilePending},
+		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected resolve command for first queued file")
+	}
+	if m.mode != modeBulkDownload || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive {
+		t.Fatalf("bulk state = mode %q current %d status %q", m.mode, m.bulk.Current, m.bulk.Items[0].Status)
+	}
+	if m.batchMode || len(m.batchSelected) != 0 {
+		t.Fatal("expected batch selection cleared once bulk queue starts")
+	}
+}
+
+func TestBulkQueueContinuesAfterFailure(t *testing.T) {
+	m := Model{
+		mode:       modeBulkDownload,
+		returnMode: modeBulkDownload,
+		bulk:       newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+	}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
+		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
+	}
+	m.bulk.Current = 0
+
+	updated, cmd := m.Update(resolvedDownloadMsg{err: errors.New("resolve failed")})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected command to start next queued file after failure")
+	}
+	if m.bulk.Items[0].Status != bulkFileFailed || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatalf("bulk items after failure = %+v current=%d", m.bulk.Items, m.bulk.Current)
+	}
+
+	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected status polling after managed download starts")
+	}
+	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command after queue finishes")
+	}
+	if !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess {
+		t.Fatalf("bulk state after completion = %+v", m.bulk.Items)
+	}
+}
+
+func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
+	m := Model{
+		mode: modeBulkDownload,
+		bulk: newBulkDownloadState([]models.Torrent{
+			{ID: "a", Filename: "complete"},
+			{ID: "b", Filename: "partial"},
+		}),
+	}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "complete", Status: bulkFileSuccess},
+		{TorrentID: "b", TorrentName: "partial", Status: bulkFileSuccess},
+		{TorrentID: "b", TorrentName: "partial", Status: bulkFileFailed, Error: "network"},
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = updated.(Model)
+	if m.mode != modeBulkCleanup {
+		t.Fatalf("mode = %q, want modeBulkCleanup", m.mode)
+	}
+	if !m.bulk.CleanupSelected["a"] {
+		t.Fatal("complete torrent should be preselected")
+	}
+	if m.bulk.CleanupSelected["b"] {
+		t.Fatal("partial torrent should not be preselected")
+	}
+	m.bulk.CleanupCursor = 1
+	updated, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	m = updated.(Model)
+	if !m.bulk.CleanupSelected["b"] || !m.bulk.hasRiskyCleanupSelection() {
+		t.Fatal("partial torrent should be manually toggleable and risky")
+	}
+}
+
+func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
+	m := Model{
+		mode:     modeBulkDownload,
+		download: &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
+		bulk:     newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+	}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
+		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
+	}
+	m.bulk.Current = 0
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command when leaving active bulk view")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want modeMain", m.mode)
+	}
+	if m.status != "Bulk download continues in background" {
+		t.Fatalf("status = %q, want background status", m.status)
+	}
+
+	updated, cmd = m.Update(downloadTickMsg(time.Now()))
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected background bulk download polling after leaving view")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want to stay in modeMain while polling", m.mode)
+	}
+
+	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusComplete}})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected command to start next queued file in background")
+	}
+	if m.mode != modeMain {
+		t.Fatalf("mode = %q, want background queue to preserve modeMain", m.mode)
+	}
+	if m.bulk.Items[0].Status != bulkFileSuccess || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatalf("bulk state = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 }

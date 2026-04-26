@@ -8,6 +8,8 @@ func surfaceShortcutDefs(m Model) []shortcutDef {
 		return detailShortcutDefs(m)
 	case modeDownload:
 		return downloadShortcutDefs(m)
+	case modeBulkDownload:
+		return bulkDownloadShortcutDefs(m)
 	case modeFileBrowser:
 		return browserShortcutDefs(m)
 	default:
@@ -87,6 +89,18 @@ func batchShortcutDefs(m Model) []shortcutDef {
 			shortcut(actionDelete, shortcutGroupActions, 3, []string{"x"}, "x", "delete").whenEnabled(func(m Model) bool { return m.hasBatchSelection() }),
 			shortcut(actionCopyURL, shortcutGroupActions, 4, []string{"y"}, "y", "copy").whenEnabled(func(m Model) bool { return m.hasBatchSelection() }),
 		)
+	}
+	defs = append(defs,
+		shortcut(actionStartDownload, shortcutGroupActions, 8, []string{"d"}, "d", "download").whenEnabled(func(m Model) bool { return m.canBulkDownloadSelection() }),
+	)
+	return defs
+}
+
+func bulkDownloadShortcutDefs(m Model) []shortcutDef {
+	defs := []shortcutDef{
+		shortcut(actionRefresh, shortcutGroupActions, 10, []string{"r"}, "r", "refresh"),
+		shortcut(actionBack, shortcutGroupNavigation, 20, []string{"esc"}, "esc", "back"),
+		shortcut(actionDelete, shortcutGroupActions, 30, []string{"x"}, "x", "cleanup").whenEnabled(func(m Model) bool { return m.bulk != nil && m.bulk.isFinished() }),
 	}
 	return defs
 }

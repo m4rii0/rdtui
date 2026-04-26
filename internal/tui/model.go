@@ -41,6 +41,11 @@ const (
 	modeOverwrite    mode = "overwrite"
 	modeShowURL      mode = "show-url"
 	modeDownload     mode = "download"
+	modeBulkOrder    mode = "bulk-order"
+	modeBulkFiles    mode = "bulk-files"
+	modeBulkConfirm  mode = "bulk-confirm"
+	modeBulkDownload mode = "bulk-download"
+	modeBulkCleanup  mode = "bulk-cleanup"
 	modeSearch       mode = "search"
 	modeDelete       mode = "delete"
 )
@@ -63,8 +68,9 @@ const (
 type batchOp string
 
 const (
-	batchOpDelete batchOp = "delete"
-	batchOpCopy   batchOp = "copy"
+	batchOpDelete      batchOp = "delete"
+	batchOpCopy        batchOp = "copy"
+	batchOpBulkCleanup batchOp = "bulk-cleanup"
 )
 
 type batchResultMsg struct {
@@ -131,6 +137,7 @@ type Model struct {
 	showURL           string
 	download          *models.ManagedDownload
 	downloadTorrentID string
+	bulk              *bulkDownloadState
 	deleteIDs         []string
 	helpVisible       bool
 	pendingAction     *pendingShortcutAction
@@ -174,6 +181,11 @@ type detailMsg struct {
 	id   string
 	info models.TorrentInfo
 	err  error
+}
+
+type bulkDetailsMsg struct {
+	details []models.TorrentInfo
+	err     error
 }
 
 type addTorrentMsg struct {
@@ -353,6 +365,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case downloadTickMsg:
+		if m.bulk != nil && m.bulk.isRunning() && m.download != nil && !m.download.IsTerminal() {
+			return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
+		}
 		if m.mode != modeDownload || m.download == nil || m.download.IsTerminal() {
 			return m, nil
 		}
@@ -408,6 +423,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if action, ok := m.consumePendingDetailAction(msg.id); ok {
 			return m.handleShortcutAction(action)
 		}
+		return m, nil
+
+	case bulkDetailsMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		if m.bulk == nil {
+			return m, nil
+		}
+		m.bulk.applyDetails(msg.details)
+		if m.bulk.prepareFirstFilePrompt() {
+			m.mode = modeBulkFiles
+			m.errText = ""
+			return m, nil
+		}
+		m.bulk.buildQueueItems()
+		m.mode = modeBulkConfirm
+		m.errText = ""
 		return m, nil
 
 	case addTorrentMsg:
@@ -525,6 +560,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearBatchSelection()
 			m.batchMode = false
 			return m, m.setFlash(flashSuccess, flashMsg)
+		case batchOpBulkCleanup:
+			if msg.err != nil {
+				m.errText = msg.err.Error()
+				return m, nil
+			}
+			m.mode = modeBulkDownload
+			var flashMsg string
+			if msg.failed > 0 {
+				flashMsg = fmt.Sprintf("Deleted %d/%d source torrent(s)", msg.success, msg.total)
+			} else {
+				flashMsg = fmt.Sprintf("Deleted %d source torrent(s)", msg.success)
+			}
+			if msg.detail != "" {
+				m.errText = strings.TrimSpace(msg.detail)
+			} else {
+				m.errText = ""
+			}
+			return m, tea.Batch(refreshCmd(m.service), m.setFlash(flashSuccess, flashMsg))
 		}
 
 	case handoffMsg:
@@ -544,6 +597,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case managedDownloadMsg:
 		m.loading = false
+		if m.returnMode == modeBulkDownload && m.bulk != nil {
+			if msg.err != nil {
+				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
+				return m.startNextBulkItem()
+			}
+			download := msg.result.Download
+			m.download = &download
+			m.mode = modeBulkDownload
+			m.errText = ""
+			if msg.result.Reused {
+				m.status = "Reopened active bulk download: " + download.Filename
+			} else {
+				m.status = "Started bulk download: " + download.Filename
+			}
+			if download.IsTerminal() {
+				if download.IsComplete() {
+					m.bulk.finishCurrent(bulkFileSuccess, download.Filename, "")
+				} else {
+					m.bulk.finishCurrent(bulkFileFailed, download.Filename, download.ErrorMessage)
+				}
+				return m.startNextBulkItem()
+			}
+			return m, tea.Batch(downloadStatusCmd(m.service), downloadTickCmd())
+		}
 		if msg.err != nil {
 			m.errText = msg.err.Error()
 			return m, nil
@@ -565,12 +642,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resolvedDownloadMsg:
 		m.loading = false
 		if msg.err != nil {
+			if m.returnMode == modeBulkDownload && m.bulk != nil {
+				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
+				return m.startNextBulkItem()
+			}
 			m.errText = msg.err.Error()
 			return m, nil
 		}
 		path := filepath.Join(m.downloadDir, msg.filename)
 		existingBytes, exists, err := existingFileSize(path)
 		if err != nil {
+			if m.returnMode == modeBulkDownload && m.bulk != nil {
+				m.bulk.finishCurrent(bulkFileFailed, msg.filename, err.Error())
+				return m.startNextBulkItem()
+			}
 			m.errText = err.Error()
 			return m, nil
 		}
@@ -596,6 +681,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		download := msg.download
 		m.download = &download
+		if m.bulk != nil && m.bulk.isRunning() {
+			if msg.err != nil {
+				errText := msg.err.Error()
+				if download.ErrorMessage != "" {
+					errText = download.ErrorMessage
+				}
+				m.bulk.finishCurrent(bulkFileFailed, download.Filename, errText)
+				return m.startNextBulkItem()
+			}
+			if download.IsComplete() {
+				m.bulk.finishCurrent(bulkFileSuccess, download.Filename, "")
+				return m.startNextBulkItem()
+			}
+			if download.IsError() {
+				m.bulk.finishCurrent(bulkFileFailed, download.Filename, download.ErrorMessage)
+				return m.startNextBulkItem()
+			}
+			return m, nil
+		}
 		if msg.err != nil {
 			m.status = "Managed download failed"
 			m.errText = ""
@@ -729,6 +833,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, pollDeviceCmd(m.service, *m.deviceCode)
 			}
 		}
+
+	case modeBulkDownload:
+		if msg.Code == tea.KeyEscape || msg.String() == "esc" {
+			return m.handleShortcutAction(actionBack)
+		}
 	}
 
 	if action, ok := m.matchShortcut(msg); ok {
@@ -812,7 +921,11 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		return m, nil
 	case actionRefresh:
 		switch m.mode {
-		case modeDownload:
+		case modeDownload, modeBulkDownload:
+			if m.mode == modeBulkDownload && (m.bulk == nil || m.bulk.isFinished()) {
+				m.loading = true
+				return m, refreshCmd(m.service)
+			}
 			m.loading = true
 			return m, downloadStatusCmd(m.service)
 		default:
@@ -854,6 +967,16 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		return m.handleDownloadAction()
 	case actionDelete:
 		return m.handleDeleteAction()
+	case actionMoveItemUp:
+		if m.mode == modeBulkOrder && m.bulk != nil {
+			m.bulk.moveOrderItem(-1)
+		}
+		return m, nil
+	case actionMoveItemDown:
+		if m.mode == modeBulkOrder && m.bulk != nil {
+			m.bulk.moveOrderItem(1)
+		}
+		return m, nil
 	case actionToggleBatch:
 		m.batchMode = !m.batchMode
 		if !m.batchMode {
@@ -906,6 +1029,11 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 			m.mode = m.returnMode
 			if m.download != nil && !m.download.IsTerminal() {
 				m.status = "Download continues in background"
+			}
+		case modeBulkDownload:
+			m.mode = modeMain
+			if m.bulk != nil && !m.bulk.isFinished() {
+				m.status = "Bulk download continues in background"
 			}
 		case modeFileBrowser:
 			m.mode = m.returnMode
@@ -979,6 +1107,10 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionToggleSelection:
 		if m.mode == modeSelectFiles {
 			m.selector.toggleCurrent()
+		} else if m.mode == modeBulkFiles && m.bulk != nil {
+			m.bulk.toggleCurrentFile()
+		} else if m.mode == modeBulkCleanup && m.bulk != nil {
+			m.bulk.toggleCleanupSelection()
 		}
 		return m, nil
 	case actionSelectAll:
@@ -986,11 +1118,19 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 			for _, file := range m.selector.Files {
 				m.selector.Selected[file.ID] = true
 			}
+		} else if m.mode == modeBulkFiles && m.bulk != nil {
+			m.bulk.selectAllCurrentFiles()
+		} else if m.mode == modeBulkCleanup && m.bulk != nil {
+			m.bulk.selectAllCleanup()
 		}
 		return m, nil
 	case actionClearSelection:
 		if m.mode == modeSelectFiles {
 			m.selector.Selected = map[int]bool{}
+		} else if m.mode == modeBulkFiles && m.bulk != nil {
+			m.bulk.clearCurrentFiles()
+		} else if m.mode == modeBulkCleanup && m.bulk != nil {
+			m.bulk.clearCleanup()
 		}
 		return m, nil
 	case actionOpenFile:
@@ -1039,6 +1179,21 @@ func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.targets.Cursor = newIdx
+		return m, nil
+	case modeBulkOrder:
+		if m.bulk != nil {
+			m.bulk.moveOrderCursor(delta)
+		}
+		return m, nil
+	case modeBulkFiles:
+		if m.bulk != nil {
+			m.bulk.moveFileCursor(delta)
+		}
+		return m, nil
+	case modeBulkCleanup:
+		if m.bulk != nil {
+			m.bulk.moveCleanupCursor(delta)
+		}
 		return m, nil
 	}
 	return m, nil
@@ -1099,7 +1254,11 @@ func (m Model) handleCopyAction() (tea.Model, tea.Cmd) {
 func (m Model) handleDownloadAction() (tea.Model, tea.Cmd) {
 	if m.mode == modeMain {
 		if m.batchMode {
-			return m, nil
+			if !m.canBulkDownloadSelection() {
+				m.errText = "Mark at least two downloaded torrents to bulk download"
+				return m, nil
+			}
+			return m.beginBulkDownloadSetup()
 		}
 		if m.detail != nil && m.detail.Status == "downloaded" {
 			m.returnMode = modeMain
@@ -1155,6 +1314,14 @@ func (m Model) handleDeleteAction() (tea.Model, tea.Cmd) {
 		m.mode = modeDelete
 		m.deleteIDs = []string{m.downloadTorrentID}
 		return m, nil
+	case modeBulkDownload:
+		if m.bulk == nil || !m.bulk.isFinished() {
+			return m, nil
+		}
+		m.returnMode = modeBulkDownload
+		m.bulk.initCleanupSelection()
+		m.mode = modeBulkCleanup
+		return m, nil
 	}
 	return m, nil
 }
@@ -1164,11 +1331,31 @@ func (m Model) handlePopupCancel() (tea.Model, tea.Cmd) {
 	case modeSelectFiles, modeChooseTarget:
 		m.mode = m.returnMode
 		return m, nil
+	case modeBulkOrder, modeBulkFiles, modeBulkConfirm:
+		m.mode = modeMain
+		m.bulk = nil
+		m.errText = ""
+		return m, nil
+	case modeBulkCleanup:
+		m.mode = modeBulkDownload
+		m.errText = ""
+		return m, nil
 	case modeDelete:
 		m.mode = m.returnMode
 		m.deleteIDs = nil
 		return m, nil
 	case modeOverwrite:
+		if m.returnMode == modeBulkDownload && m.bulk != nil {
+			filename := ""
+			if m.pendingDownload != nil {
+				filename = m.pendingDownload.Filename
+			}
+			m.pendingDownload = nil
+			m.bulk.finishCurrent(bulkFileSkipped, filename, "existing file skipped")
+			m.mode = modeBulkDownload
+			m.errText = ""
+			return m.startNextBulkItem()
+		}
 		m.mode = m.returnMode
 		m.pendingDownload = nil
 		m.status = "Download cancelled"
@@ -1206,6 +1393,57 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 			return m, resolveDownloadCmd(m.service, m.targets.Items[m.targets.Cursor])
 		}
 		return m, handoffCmd(m.service, m.targets.Items[m.targets.Cursor])
+	case modeBulkOrder:
+		if m.bulk == nil || len(m.bulk.Plans) == 0 {
+			return m, nil
+		}
+		m.loading = true
+		m.errText = ""
+		return m, bulkDetailsCmd(m.service, m.bulk.Plans)
+	case modeBulkFiles:
+		if m.bulk == nil {
+			return m, nil
+		}
+		if m.bulk.selectedCurrentFileCount() == 0 {
+			m.errText = "Select at least one file"
+			return m, nil
+		}
+		nextStart := m.bulk.FilePrompt + 1
+		if m.bulk.prepareNextFilePrompt(nextStart) {
+			m.errText = ""
+			return m, nil
+		}
+		m.bulk.buildQueueItems()
+		m.mode = modeBulkConfirm
+		m.errText = ""
+		return m, nil
+	case modeBulkConfirm:
+		if m.bulk == nil {
+			return m, nil
+		}
+		if len(m.bulk.Items) == 0 {
+			m.errText = "No files selected for bulk download"
+			return m, nil
+		}
+		m.returnMode = modeBulkDownload
+		m.mode = modeBulkDownload
+		m.clearBatchSelection()
+		m.batchMode = false
+		m.download = nil
+		m.status = "Starting bulk download"
+		m.errText = ""
+		return m.startNextBulkItem()
+	case modeBulkCleanup:
+		if m.bulk == nil {
+			return m, nil
+		}
+		ids := m.bulk.cleanupSelectedIDs()
+		if len(ids) == 0 {
+			m.errText = "Select at least one source torrent"
+			return m, nil
+		}
+		m.loading = true
+		return m, batchOpCmd(m.service, batchOpBulkCleanup, ids, m.torrents)
 	case modeDelete:
 		if len(m.deleteIDs) > 1 {
 			m.loading = true
@@ -1260,6 +1498,53 @@ func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 	m.targets = targetPickerState{Items: targets, Action: action}
 	m.mode = modeChooseTarget
 	return *m, nil
+}
+
+func (m Model) beginBulkDownloadSetup() (tea.Model, tea.Cmd) {
+	selected := make([]models.Torrent, 0, len(m.batchSelected))
+	for _, torrent := range m.visibleTorrents() {
+		if m.batchSelected[torrent.ID] {
+			selected = append(selected, torrent)
+		}
+	}
+	if len(selected) < 2 {
+		m.errText = "Mark at least two downloaded torrents to bulk download"
+		return m, nil
+	}
+	m.bulk = newBulkDownloadState(selected)
+	m.returnMode = modeMain
+	m.mode = modeBulkOrder
+	m.errText = ""
+	m.status = "Review bulk download order"
+	return m, nil
+}
+
+func (m Model) startNextBulkItem() (tea.Model, tea.Cmd) {
+	if m.bulk == nil {
+		return m, nil
+	}
+	foreground := m.mode == modeBulkDownload || m.mode == modeBulkConfirm
+	item := m.bulk.startNextItem()
+	if item == nil {
+		m.loading = false
+		m.download = nil
+		if foreground {
+			m.mode = modeBulkDownload
+		}
+		success, failed, skipped := m.bulk.resultCounts()
+		m.status = "Bulk download complete: " + bulkSummaryLine(success, failed, skipped)
+		m.errText = ""
+		return m, nil
+	}
+	m.returnMode = modeBulkDownload
+	if foreground {
+		m.mode = modeBulkDownload
+	}
+	m.download = nil
+	m.loading = true
+	m.status = fmt.Sprintf("Bulk downloading %d/%d: %s", m.bulk.Current+1, len(m.bulk.Items), bulkItemLabel(*item))
+	m.errText = ""
+	return m, resolveDownloadCmd(m.service, item.Target)
 }
 
 func (m Model) View() tea.View {
@@ -1419,6 +1704,24 @@ func detailCmd(service app.AppService, id string) tea.Cmd {
 	}
 }
 
+func bulkDetailsCmd(service app.AppService, plans []bulkTorrentPlan) tea.Cmd {
+	if len(plans) == 0 {
+		return nil
+	}
+	ordered := append([]bulkTorrentPlan(nil), plans...)
+	return func() tea.Msg {
+		details := make([]models.TorrentInfo, 0, len(ordered))
+		for _, plan := range ordered {
+			info, err := service.TorrentInfo(context.Background(), plan.ID)
+			if err != nil {
+				return bulkDetailsMsg{err: fmt.Errorf("load %s details: %w", plan.Name, err)}
+			}
+			details = append(details, info)
+		}
+		return bulkDetailsMsg{details: details}
+	}
+}
+
 func addMagnetCmd(service app.AppService, magnet string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := service.AddMagnet(context.Background(), magnet)
@@ -1467,6 +1770,10 @@ func batchOpCmd(service app.AppService, op batchOp, ids []string, torrents []mod
 		switch op {
 		case batchOpDelete:
 			return executeBatchDelete(service, ids)
+		case batchOpBulkCleanup:
+			result := executeBatchDelete(service, ids)
+			result.op = batchOpBulkCleanup
+			return result
 		case batchOpCopy:
 			return executeBatchCopy(service, ids, torrents)
 		}

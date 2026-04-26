@@ -263,6 +263,97 @@ func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
 	}
 }
 
+func TestBatchFooterShowsBulkDownloadActionWhenUnavailable(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true},
+		torrents:      []models.Torrent{{ID: "a", Status: "downloaded"}},
+	}
+	footer := ansi.Strip(listFooter(m))
+	if !strings.Contains(footer, "d download") {
+		t.Fatalf("footer = %q, want dimmed bulk download action visible", footer)
+	}
+	if m.canBulkDownloadSelection() {
+		t.Fatal("single marked torrent should not be eligible for bulk download")
+	}
+}
+
+func TestRenderBulkOrderPopup(t *testing.T) {
+	m := Model{mode: modeBulkOrder, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
+	view := ansi.Strip(renderBulkOrderPopup(m))
+	if !strings.Contains(view, "Bulk Download Order") || !strings.Contains(view, "Movie A") {
+		t.Fatalf("bulk order popup = %q", view)
+	}
+}
+
+func TestRenderBulkSummaryView(t *testing.T) {
+	m := Model{mode: modeBulkDownload, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "Movie A", Status: bulkFileSuccess},
+		{TorrentID: "b", TorrentName: "Movie B", Status: bulkFileFailed, Error: "network"},
+	}
+	view := ansi.Strip(renderBulkDownloadView(m))
+	if !strings.Contains(view, "Bulk Download Summary") || !strings.Contains(view, "Complete:") || !strings.Contains(view, "Failed:") {
+		t.Fatalf("bulk summary view = %q", view)
+	}
+}
+
+func TestRenderBulkProgressShowsMovingQueue(t *testing.T) {
+	m := Model{mode: modeBulkDownload, width: 110, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}, {ID: "c", Filename: "Movie C"}, {ID: "d", Filename: "Movie D"}})}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", TorrentName: "Movie A", Target: models.DownloadTarget{Label: "a.mkv"}, Status: bulkFileSuccess},
+		{TorrentID: "b", TorrentName: "Movie B", Target: models.DownloadTarget{Label: "b.mkv"}, Status: bulkFileActive},
+		{TorrentID: "c", TorrentName: "Movie C", Target: models.DownloadTarget{Label: "c.mkv"}, Status: bulkFilePending},
+		{TorrentID: "d", TorrentName: "Movie D", Target: models.DownloadTarget{Label: "d.mkv"}, Status: bulkFilePending},
+	}
+	m.bulk.Current = 1
+	m.download = &models.ManagedDownload{Filename: "b.mkv", Status: models.ManagedDownloadStatusActive, TotalLength: 100, CompletedLength: 25}
+
+	view := ansi.Strip(renderBulkDownloadView(m))
+	for _, want := range []string{"Queue:", "2 / 4", "01/04", "complete", "02/04", "active", "03/04", "pending"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("bulk progress view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRenderBulkQueueKeepsCurrentVisibleAndBounded(t *testing.T) {
+	bulk := newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}})
+	for idx := 0; idx < 12; idx++ {
+		status := bulkFilePending
+		if idx < 8 {
+			status = bulkFileSuccess
+		}
+		if idx == 8 {
+			status = bulkFileActive
+		}
+		bulk.Items = append(bulk.Items, bulkQueueItem{TorrentID: "a", TorrentName: "Movie A", Target: models.DownloadTarget{Label: fmt.Sprintf("file-%02d.mkv", idx+1)}, Status: status})
+	}
+	bulk.Current = 8
+
+	queue := ansi.Strip(renderBulkQueue(bulk, 90, 5))
+	if !strings.Contains(queue, "09/12") || !strings.Contains(queue, "active") {
+		t.Fatalf("queue should keep active item visible:\n%s", queue)
+	}
+	if strings.Contains(queue, "01/12") || strings.Contains(queue, "12/12") {
+		t.Fatalf("queue should be bounded around current item:\n%s", queue)
+	}
+	if strings.Count(queue, "...") != 2 {
+		t.Fatalf("queue should show hidden rows above and below:\n%s", queue)
+	}
+}
+
+func TestRenderBulkCleanupWarning(t *testing.T) {
+	m := Model{mode: modeBulkCleanup, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}})}
+	m.bulk.Items = []bulkQueueItem{{TorrentID: "a", TorrentName: "Movie A", Status: bulkFileFailed, Error: "network"}}
+	m.bulk.CleanupSelected = map[string]bool{"a": true}
+	view := ansi.Strip(renderBulkCleanupPopup(m))
+	if !strings.Contains(view, "Warning: selected torrents include incomplete downloads") {
+		t.Fatalf("cleanup popup = %q, want risky selection warning", view)
+	}
+}
+
 func TestHelpOverlayKeepsUnavailableMainActionsVisible(t *testing.T) {
 	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
 	got := ansi.Strip(renderHelpOverlay(m))

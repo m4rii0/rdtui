@@ -26,7 +26,7 @@ All code, opinions, design decisions, and documentation in this repository are m
 - Monitor in-progress downloads with a live progress screen, with options to open the completed file, reveal it in its directory, or delete the source torrent
 - Fuzzy search and filter torrents
 - Sort torrents by status, progress, size, date, or name
-- Batch operations: select multiple torrents to delete or copy URLs in bulk
+- Batch operations: select multiple torrents to delete, copy URLs, or download completed torrents in bulk
 - Delete torrents
 - Built-in help overlay listing all available shortcuts
 
@@ -206,6 +206,7 @@ Batch mode (`b`):
 - `ctrl+a`: select all, `ctrl+d`: clear selection
 - `x`: delete marked torrents
 - `y`: copy URLs for marked torrents
+- `d`: bulk download marked completed torrents
 - `b` / `esc`: exit batch mode
 
 Detail view (`enter`):
@@ -226,6 +227,10 @@ Download progress view (`d`):
 Press `d` on a ready torrent to resolve the selected target and start a managed local download. `rdtui` shows a dedicated progress screen and lets you refresh progress, open the completed file, reveal it in its directory, or delete the source torrent once the download has completed.
 
 If target file already exists in `default_download_dir`, `rdtui` pauses first and asks whether you want to download it again, showing current local size and size difference when remote size is known.
+
+In batch mode, press `d` after marking at least two completed torrents to create a bulk download queue. The queue defaults to the current table order, lets you reorder torrents, asks which files to download when a torrent has multiple downloadable files, and asks for final confirmation before starting. Bulk downloads run sequentially and continue after individual failures; the summary reports completed, failed, skipped, and partial results.
+
+After a bulk download finishes, press `x` from the bulk summary to clean up source torrents. Fully successful torrents are pre-selected for deletion, while failed or partial torrents are left unselected by default but can be toggled manually before confirmation.
 
 When `download_backend` is `aria2`, `rdtui` starts its own loopback-only `aria2c` RPC session for the download.
 

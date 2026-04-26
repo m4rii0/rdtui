@@ -97,7 +97,8 @@ func isPopupMode(m mode) bool {
 	switch m {
 	case modeSelectFiles, modeDelete, modeChooseTarget,
 		modeOverwrite, modeShowURL, modeFileBrowser,
-		modeMagnetInput, modeURLInput:
+		modeMagnetInput, modeURLInput, modeBulkOrder,
+		modeBulkFiles, modeBulkConfirm, modeBulkCleanup:
 		return true
 	}
 	return false
@@ -121,6 +122,14 @@ func renderPopupContent(m Model) string {
 		return renderInputPopup(m, "Paste a magnet link")
 	case modeURLInput:
 		return renderInputPopup(m, "Paste a .torrent URL")
+	case modeBulkOrder:
+		return renderBulkOrderPopup(m)
+	case modeBulkFiles:
+		return renderBulkFilesPopup(m)
+	case modeBulkConfirm:
+		return renderBulkConfirmPopup(m)
+	case modeBulkCleanup:
+		return renderBulkCleanupPopup(m)
 	}
 	return ""
 }
@@ -139,6 +148,8 @@ func renderBackground(m Model) string {
 		return renderDetailView(m)
 	case m.mode == modeDownload:
 		return renderDownloadView(m)
+	case m.mode == modeBulkDownload:
+		return renderBulkDownloadView(m)
 	case m.mode == modeMain, m.mode == modeSearch,
 		m.mode == modeMagnetInput, m.mode == modeURLInput:
 		return renderMain(m)
@@ -148,6 +159,9 @@ func renderBackground(m Model) string {
 		}
 		if m.returnMode == modeDownload {
 			return renderDownloadView(m)
+		}
+		if m.returnMode == modeBulkDownload {
+			return renderBulkDownloadView(m)
 		}
 		return renderMain(m)
 	}
