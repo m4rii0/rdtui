@@ -12,6 +12,8 @@ func overlayShortcutDefs(m Model) []shortcutDef {
 		return overwriteShortcutDefs()
 	case modeShowURL:
 		return showURLShortcutDefs()
+	case modeBulkSelectFiles:
+		return bulkFileSelectionShortcutDefs()
 	case modeBulkOrder:
 		return bulkOrderShortcutDefs()
 	case modeBulkFiles:
@@ -78,6 +80,10 @@ func bulkOrderShortcutDefs() []shortcutDef {
 		shortcut(actionPopupConfirm, shortcutGroupActions, 20, []string{"enter"}, "enter", "confirm"),
 		shortcut(actionPopupCancel, shortcutGroupNavigation, 21, []string{"esc"}, "esc", "cancel"),
 	}
+}
+
+func bulkFileSelectionShortcutDefs() []shortcutDef {
+	return selectFilesShortcutDefs()
 }
 
 func bulkFilesShortcutDefs() []shortcutDef {

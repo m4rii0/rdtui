@@ -97,7 +97,7 @@ func isPopupMode(m mode) bool {
 	switch m {
 	case modeSelectFiles, modeDelete, modeChooseTarget,
 		modeOverwrite, modeShowURL, modeFileBrowser,
-		modeMagnetInput, modeURLInput, modeBulkOrder,
+		modeMagnetInput, modeURLInput, modeBulkSelectFiles, modeBulkOrder,
 		modeBulkFiles, modeBulkConfirm, modeBulkCleanup:
 		return true
 	}
@@ -122,6 +122,8 @@ func renderPopupContent(m Model) string {
 		return renderInputPopup(m, "Paste a magnet link")
 	case modeURLInput:
 		return renderInputPopup(m, "Paste a .torrent URL")
+	case modeBulkSelectFiles:
+		return renderBulkFileSelectionPopup(m)
 	case modeBulkOrder:
 		return renderBulkOrderPopup(m)
 	case modeBulkFiles:

@@ -91,7 +91,8 @@ func batchShortcutDefs(m Model) []shortcutDef {
 		)
 	}
 	defs = append(defs,
-		shortcut(actionStartDownload, shortcutGroupActions, 8, []string{"d"}, "d", "download").whenEnabled(func(m Model) bool { return m.canBulkDownloadSelection() }),
+		shortcut(actionOpenSelectFiles, shortcutGroupActions, 8, []string{"s"}, "s", "select").whenEnabled(func(m Model) bool { return m.canBulkSelectFilesSelection() }),
+		shortcut(actionStartDownload, shortcutGroupActions, 9, []string{"d"}, "d", "download").whenEnabled(func(m Model) bool { return m.canBulkDownloadSelection() }),
 	)
 	return defs
 }

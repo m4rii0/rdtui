@@ -95,11 +95,23 @@ func (m Model) canBulkDownloadSelection() bool {
 	return selected >= 2
 }
 
+func (m Model) canBulkSelectFilesSelection() bool {
+	if !m.batchMode || len(m.batchSelected) == 0 {
+		return false
+	}
+	for _, torrent := range m.visibleTorrents() {
+		if m.batchSelected[torrent.ID] && isFileSelectionStatus(torrent.Status) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) canShowHelp() bool {
 	switch m.mode {
 	case modeMain, modeDetail, modeDownload, modeBulkDownload,
-		modeSelectFiles, modeChooseTarget, modeBulkOrder, modeBulkFiles,
-		modeBulkConfirm, modeBulkCleanup:
+		modeSelectFiles, modeChooseTarget, modeBulkSelectFiles,
+		modeBulkOrder, modeBulkFiles, modeBulkConfirm, modeBulkCleanup:
 		return true
 	case modeFileBrowser:
 		return !m.browser.EditingPath

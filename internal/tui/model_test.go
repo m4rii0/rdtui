@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -1113,3 +1115,253 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("bulk state after background completion = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 }
+
+func TestBulkSelectFilesStartsWithEligibleAndSkippedSelections(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		sortColumn:    colAdded,
+		sortAscending: false,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "waiting", Status: "waiting_files_selection", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+			{ID: "b", Filename: "ready", Status: "downloaded", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
+			{ID: "c", Filename: "queued", Status: "queued", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
+		},
+		batchSelected: map[string]bool{"a": true, "b": true, "c": true},
+	}
+
+	if !m.canBulkSelectFilesSelection() {
+		t.Fatal("expected at least one eligible marked torrent")
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected command to load eligible torrent details")
+	}
+	if m.mode != modeBulkSelectFiles || m.bulkSelect == nil {
+		t.Fatalf("mode = %q bulkSelect nil=%v, want bulk file-selection setup", m.mode, m.bulkSelect == nil)
+	}
+	if len(m.bulkSelect.Plans) != 1 || m.bulkSelect.Plans[0].ID != "a" {
+		t.Fatalf("plans = %+v, want only eligible torrent a", m.bulkSelect.Plans)
+	}
+	if len(m.bulkSelect.Outcomes) != 2 || m.bulkSelect.Outcomes[0].Status != bulkFileSelectionSkipped || m.bulkSelect.Outcomes[1].Status != bulkFileSelectionSkipped {
+		t.Fatalf("outcomes = %+v, want two skipped torrents", m.bulkSelect.Outcomes)
+	}
+}
+
+func TestBulkSelectFilesRejectsSelectionWithNoEligibleTorrents(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		torrents:      []models.Torrent{{ID: "a", Filename: "ready", Status: "downloaded"}},
+		batchSelected: map[string]bool{"a": true},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command when no marked torrent needs file selection")
+	}
+	if m.mode != modeMain || m.errText != "Mark at least one torrent that needs file selection" {
+		t.Fatalf("mode=%q errText=%q", m.mode, m.errText)
+	}
+}
+
+func TestBulkSelectFilesUsesFilteredVisibleOrder(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		filterApplied: true,
+		torrents: []models.Torrent{
+			{ID: "a", Filename: "alpha", Status: "waiting_files_selection"},
+			{ID: "b", Filename: "hidden", Status: "waiting_files_selection"},
+			{ID: "c", Filename: "charlie", Status: "magnet_conversion"},
+		},
+		filteredTorrents: []models.Torrent{
+			{ID: "c", Filename: "charlie", Status: "magnet_conversion"},
+			{ID: "a", Filename: "alpha", Status: "waiting_files_selection"},
+		},
+		batchSelected: map[string]bool{"a": true, "b": true, "c": true},
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(Model)
+	if len(m.bulkSelect.Plans) != 2 || m.bulkSelect.Plans[0].ID != "c" || m.bulkSelect.Plans[1].ID != "a" {
+		t.Fatalf("plans = %+v, want filtered visible order [c a]", m.bulkSelect.Plans)
+	}
+}
+
+func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) {
+	m := Model{
+		mode:       modeBulkSelectFiles,
+		batchMode:  true,
+		bulkSelect: newBulkFileSelectionState([]models.Torrent{{ID: "a", Filename: "alpha"}}, nil),
+	}
+
+	updated, _ := m.Update(bulkFileSelectionDetailsMsg{details: []models.TorrentInfo{{
+		Torrent: models.Torrent{ID: "a", Filename: "alpha"},
+		Files: []models.TorrentFile{
+			{ID: 1, Path: "small.mkv", Bytes: 100},
+			{ID: 2, Path: "large.mkv", Bytes: 200},
+		},
+	}}})
+	m = updated.(Model)
+	if m.mode != modeBulkSelectFiles {
+		t.Fatalf("mode = %q, want modeBulkSelectFiles", m.mode)
+	}
+	if !m.bulkSelect.Plans[0].Selected[2] || m.bulkSelect.Plans[0].Selected[1] {
+		t.Fatalf("selected = %+v, want only largest file preselected", m.bulkSelect.Plans[0].Selected)
+	}
+
+	m.bulkSelect.clearCurrentFiles()
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no submit command for empty file selection")
+	}
+	if m.mode != modeBulkSelectFiles || m.errText != "Select at least one file" {
+		t.Fatalf("mode=%q errText=%q", m.mode, m.errText)
+	}
+}
+
+func TestBulkSelectFilesCancelKeepsBatchSelection(t *testing.T) {
+	m := Model{
+		mode:          modeBulkSelectFiles,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true},
+		bulkSelect:    newBulkFileSelectionState([]models.Torrent{{ID: "a", Filename: "alpha"}}, nil),
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command when cancelling bulk file selection setup")
+	}
+	if m.mode != modeMain || !m.batchMode || !m.batchSelected["a"] || m.bulkSelect != nil {
+		t.Fatalf("mode=%q batchMode=%v selected=%+v bulkSelect=%+v", m.mode, m.batchMode, m.batchSelected, m.bulkSelect)
+	}
+}
+
+func TestBulkSelectFilesSubmitsSequentiallyAndReportsPartialFailure(t *testing.T) {
+	service := &bulkFileSelectionTestService{
+		selectErr: map[string]error{"b": errors.New("denied")},
+		selected:  map[string][]int{},
+	}
+	m := Model{
+		mode:          modeBulkSelectFiles,
+		service:       service,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true, "b": true, "c": true},
+		bulkSelect: &bulkFileSelectionState{
+			Prompt: 1,
+			Plans: []bulkFileSelectionPlan{
+				{ID: "a", Name: "alpha", Files: []models.TorrentFile{{ID: 1, Path: "a.mkv"}}, Selected: map[int]bool{1: true}},
+				{ID: "b", Name: "beta", Files: []models.TorrentFile{{ID: 2, Path: "b.mkv"}}, Selected: map[int]bool{2: true}},
+			},
+			Outcomes: []bulkFileSelectionOutcome{{ID: "c", Name: "complete", Status: bulkFileSelectionSkipped}},
+		},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected bulk SelectFiles command")
+	}
+	updated, cmd = m.Update(cmd())
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected refresh/flash batch command after bulk selection result")
+	}
+	if len(service.selected["a"]) != 1 || service.selected["a"][0] != 1 || len(service.selected["b"]) != 1 || service.selected["b"][0] != 2 {
+		t.Fatalf("selected submissions = %+v", service.selected)
+	}
+	if m.mode != modeMain || m.batchMode || len(m.batchSelected) != 0 || m.bulkSelect != nil {
+		t.Fatalf("mode=%q batchMode=%v selected=%+v bulkSelect=%+v", m.mode, m.batchMode, m.batchSelected, m.bulkSelect)
+	}
+	if !strings.Contains(m.flash.message, "1 updated, 1 failed, 1 skipped") {
+		t.Fatalf("flash = %q, want result counts", m.flash.message)
+	}
+	if !strings.Contains(m.errText, "beta: denied") {
+		t.Fatalf("errText = %q, want failed torrent detail", m.errText)
+	}
+}
+
+type bulkFileSelectionTestService struct {
+	details   map[string]models.TorrentInfo
+	detailErr map[string]error
+	selectErr map[string]error
+	selected  map[string][]int
+}
+
+func (s *bulkFileSelectionTestService) Config() config.Config { return config.Config{} }
+
+func (s *bulkFileSelectionTestService) Bootstrap(context.Context) (*models.AuthSession, error) {
+	return nil, nil
+}
+
+func (s *bulkFileSelectionTestService) AuthenticateWithToken(context.Context, string, bool) (*models.AuthSession, error) {
+	return nil, nil
+}
+
+func (s *bulkFileSelectionTestService) StartDeviceFlow(context.Context) (models.DeviceCode, error) {
+	return models.DeviceCode{}, nil
+}
+
+func (s *bulkFileSelectionTestService) CompleteDeviceFlow(context.Context, models.DeviceCode) (*models.AuthSession, error) {
+	return nil, nil
+}
+
+func (s *bulkFileSelectionTestService) ListTorrents(context.Context) ([]models.Torrent, error) {
+	return nil, nil
+}
+
+func (s *bulkFileSelectionTestService) TorrentInfo(_ context.Context, id string) (models.TorrentInfo, error) {
+	if err := s.detailErr[id]; err != nil {
+		return models.TorrentInfo{}, err
+	}
+	return s.details[id], nil
+}
+
+func (s *bulkFileSelectionTestService) AddMagnet(context.Context, string) (models.AddTorrentResult, error) {
+	return models.AddTorrentResult{}, nil
+}
+
+func (s *bulkFileSelectionTestService) AddTorrentURL(context.Context, string) (models.AddTorrentResult, error) {
+	return models.AddTorrentResult{}, nil
+}
+
+func (s *bulkFileSelectionTestService) ImportTorrentFiles(context.Context, []string) []models.ImportResult {
+	return nil
+}
+
+func (s *bulkFileSelectionTestService) SelectFiles(_ context.Context, torrentID string, ids []int) error {
+	if s.selected == nil {
+		s.selected = map[string][]int{}
+	}
+	s.selected[torrentID] = append([]int(nil), ids...)
+	return s.selectErr[torrentID]
+}
+
+func (s *bulkFileSelectionTestService) DeleteTorrent(context.Context, string) error { return nil }
+
+func (s *bulkFileSelectionTestService) ResolveDirectURL(context.Context, models.DownloadTarget) (models.UnrestrictedLink, error) {
+	return models.UnrestrictedLink{}, nil
+}
+
+func (s *bulkFileSelectionTestService) CopyURL(string) (bool, error) { return false, nil }
+
+func (s *bulkFileSelectionTestService) StartManagedDownload(context.Context, string, string) (models.ManagedDownloadStart, error) {
+	return models.ManagedDownloadStart{}, nil
+}
+
+func (s *bulkFileSelectionTestService) ManagedDownloadStatus(context.Context) (models.ManagedDownload, bool, error) {
+	return models.ManagedDownload{}, false, nil
+}
+
+func (s *bulkFileSelectionTestService) SavePrivateToken(string) error { return nil }
+
+func (s *bulkFileSelectionTestService) OpenFile(string) error { return nil }
+
+func (s *bulkFileSelectionTestService) RevealInDirectory(string) error { return nil }
+
+func (s *bulkFileSelectionTestService) Close() error { return nil }

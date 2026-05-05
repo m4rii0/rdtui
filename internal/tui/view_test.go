@@ -279,6 +279,46 @@ func TestBatchFooterShowsBulkDownloadActionWhenUnavailable(t *testing.T) {
 	}
 }
 
+func TestBatchFooterShowsBulkFileSelectionActionWhenUnavailable(t *testing.T) {
+	m := Model{
+		mode:          modeMain,
+		batchMode:     true,
+		batchSelected: map[string]bool{"a": true},
+		torrents:      []models.Torrent{{ID: "a", Status: "downloaded"}},
+	}
+	footer := ansi.Strip(listFooter(m))
+	if !strings.Contains(footer, "s select") {
+		t.Fatalf("footer = %q, want bulk file selection action visible", footer)
+	}
+	if m.canBulkSelectFilesSelection() {
+		t.Fatal("downloaded torrent should not be eligible for bulk file selection")
+	}
+}
+
+func TestRenderBulkFileSelectionPopup(t *testing.T) {
+	m := Model{
+		mode:   modeBulkSelectFiles,
+		width:  100,
+		height: 24,
+		bulkSelect: &bulkFileSelectionState{
+			Prompt: 0,
+			Plans: []bulkFileSelectionPlan{{
+				ID:       "a",
+				Name:     "Movie A",
+				Files:    []models.TorrentFile{{ID: 1, Path: "movie-a.mkv", Bytes: 1024}},
+				Selected: map[int]bool{1: true},
+			}},
+			Outcomes: []bulkFileSelectionOutcome{{ID: "b", Name: "ready", Status: bulkFileSelectionSkipped}},
+		},
+	}
+	view := ansi.Strip(renderBulkFileSelectionPopup(m))
+	for _, want := range []string{"Bulk Select Files", "Movie A", "movie-a.mkv", "ineligible marked torrent"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("bulk file-selection popup missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestRenderBulkOrderPopup(t *testing.T) {
 	m := Model{mode: modeBulkOrder, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
 	view := ansi.Strip(renderBulkOrderPopup(m))

@@ -197,18 +197,19 @@ Key bindings (main view):
 - `y`: resolve a ready torrent target to a direct URL and show or copy it
 - `d`: resolve a ready torrent target and start a local download using the configured `download_backend`
 - `x`: delete the selected torrent
-- `b`: enter batch mode (select multiple torrents)
+- `b`: enter bulk operations mode (select multiple torrents)
 - `S` / `P` / `Z` / `D` / `N`: sort by status / progress / size / date / name
 - `?`: toggle help overlay
 - `q`: quit (or clear active filter)
 
-Batch mode (`b`):
+Bulk operations mode (`b`):
 - `space`: mark/unmark torrent
 - `ctrl+a`: select all, `ctrl+d`: clear selection
+- `s`: select files for marked torrents awaiting file selection
 - `x`: delete marked torrents
 - `y`: copy URLs for marked torrents
 - `d`: bulk download marked completed torrents
-- `b` / `esc`: exit batch mode
+- `b` / `esc`: exit bulk operations mode
 
 Detail view (`enter`):
 - `s`: select files (when applicable)
@@ -230,6 +231,8 @@ Press `d` on a ready torrent to resolve the selected target and start a managed 
 If target file already exists in `default_download_dir`, `rdtui` pauses first and asks whether you want to download it again, showing current local size and size difference when remote size is known.
 
 In batch mode, press `d` after marking at least two completed torrents to create a bulk download queue. The `d` shortcut is dimmed when fewer than two marked torrents are `downloaded`. The queue defaults to the current table order, lets you reorder torrents, asks which files to download when a torrent has multiple downloadable files (single-target torrents are auto-selected), and asks for final confirmation before starting. Bulk downloads run sequentially and continue after individual failures; the summary reports completed, failed, skipped, and partial results. If a target file already exists in the download directory, you are asked whether to re-download it before that file's download starts.
+
+In bulk operations mode, press `s` after marking torrents to select Real-Debrid source files for torrents awaiting file selection. Ineligible marked torrents are skipped instead of blocking the operation, eligible torrents are prompted one at a time in the current filtered table order, and submissions continue after individual failures.
 
 During an active bulk download, the queue view highlights the current item and keeps it visible as the queue advances. Pressing `esc` returns to the torrent list while the queue continues in the background.
 

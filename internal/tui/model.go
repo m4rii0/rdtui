@@ -27,27 +27,28 @@ const downloadRefreshInterval = time.Second
 type mode string
 
 const (
-	modeStarting     mode = "starting"
-	modeAuthChoice   mode = "auth-choice"
-	modeTokenInput   mode = "token-input"
-	modeDeviceAuth   mode = "device-auth"
-	modeMain         mode = "main"
-	modeDetail       mode = "detail"
-	modeMagnetInput  mode = "magnet-input"
-	modeURLInput     mode = "url-input"
-	modeFileBrowser  mode = "file-browser"
-	modeSelectFiles  mode = "select-files"
-	modeChooseTarget mode = "choose-target"
-	modeOverwrite    mode = "overwrite"
-	modeShowURL      mode = "show-url"
-	modeDownload     mode = "download"
-	modeBulkOrder    mode = "bulk-order"
-	modeBulkFiles    mode = "bulk-files"
-	modeBulkConfirm  mode = "bulk-confirm"
-	modeBulkDownload mode = "bulk-download"
-	modeBulkCleanup  mode = "bulk-cleanup"
-	modeSearch       mode = "search"
-	modeDelete       mode = "delete"
+	modeStarting        mode = "starting"
+	modeAuthChoice      mode = "auth-choice"
+	modeTokenInput      mode = "token-input"
+	modeDeviceAuth      mode = "device-auth"
+	modeMain            mode = "main"
+	modeDetail          mode = "detail"
+	modeMagnetInput     mode = "magnet-input"
+	modeURLInput        mode = "url-input"
+	modeFileBrowser     mode = "file-browser"
+	modeSelectFiles     mode = "select-files"
+	modeChooseTarget    mode = "choose-target"
+	modeOverwrite       mode = "overwrite"
+	modeShowURL         mode = "show-url"
+	modeDownload        mode = "download"
+	modeBulkSelectFiles mode = "bulk-select-files"
+	modeBulkOrder       mode = "bulk-order"
+	modeBulkFiles       mode = "bulk-files"
+	modeBulkConfirm     mode = "bulk-confirm"
+	modeBulkDownload    mode = "bulk-download"
+	modeBulkCleanup     mode = "bulk-cleanup"
+	modeSearch          mode = "search"
+	modeDelete          mode = "delete"
 )
 
 type inputAction string
@@ -138,6 +139,7 @@ type Model struct {
 	download          *models.ManagedDownload
 	downloadTorrentID string
 	bulk              *bulkDownloadState
+	bulkSelect        *bulkFileSelectionState
 	deleteIDs         []string
 	helpVisible       bool
 	pendingAction     *pendingShortcutAction
@@ -496,6 +498,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = m.returnMode
 		m.errText = ""
 		return m, tea.Batch(refreshCmd(m.service), m.setFlash(flashSuccess, "Updated torrent file selection"))
+
+	case bulkFileSelectionDetailsMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		if m.bulkSelect == nil {
+			return m, nil
+		}
+		m.bulkSelect.applyDetails(msg.details, msg.outcomes)
+		if m.bulkSelect.prepareFirstPrompt() {
+			m.mode = modeBulkSelectFiles
+			m.errText = ""
+			return m, nil
+		}
+		return m.startBulkFileSelectionSubmit()
+
+	case bulkFileSelectionResultMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			return m, nil
+		}
+		m.mode = modeMain
+		m.bulkSelect = nil
+		m.clearBatchSelection()
+		m.batchMode = false
+		flashMsg := "Bulk file selection complete: " + bulkFileSelectionSummaryLine(msg.success, msg.failed, msg.skipped)
+		if msg.detail != "" {
+			m.errText = strings.TrimSpace(msg.detail)
+		} else {
+			m.errText = ""
+		}
+		level := flashSuccess
+		if msg.failed > 0 {
+			level = flashWarn
+		}
+		return m, tea.Batch(refreshCmd(m.service), m.setFlash(level, flashMsg))
 
 	case deleteMsg:
 		m.loading = false
@@ -1110,6 +1151,8 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionToggleSelection:
 		if m.mode == modeSelectFiles {
 			m.selector.toggleCurrent()
+		} else if m.mode == modeBulkSelectFiles && m.bulkSelect != nil {
+			m.bulkSelect.toggleCurrentFile()
 		} else if m.mode == modeBulkFiles && m.bulk != nil {
 			m.bulk.toggleCurrentFile()
 		} else if m.mode == modeBulkCleanup && m.bulk != nil {
@@ -1121,6 +1164,8 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 			for _, file := range m.selector.Files {
 				m.selector.Selected[file.ID] = true
 			}
+		} else if m.mode == modeBulkSelectFiles && m.bulkSelect != nil {
+			m.bulkSelect.selectAllCurrentFiles()
 		} else if m.mode == modeBulkFiles && m.bulk != nil {
 			m.bulk.selectAllCurrentFiles()
 		} else if m.mode == modeBulkCleanup && m.bulk != nil {
@@ -1130,6 +1175,8 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionClearSelection:
 		if m.mode == modeSelectFiles {
 			m.selector.Selected = map[int]bool{}
+		} else if m.mode == modeBulkSelectFiles && m.bulkSelect != nil {
+			m.bulkSelect.clearCurrentFiles()
 		} else if m.mode == modeBulkFiles && m.bulk != nil {
 			m.bulk.clearCurrentFiles()
 		} else if m.mode == modeBulkCleanup && m.bulk != nil {
@@ -1183,6 +1230,11 @@ func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
 		}
 		m.targets.Cursor = newIdx
 		return m, nil
+	case modeBulkSelectFiles:
+		if m.bulkSelect != nil {
+			m.bulkSelect.moveFileCursor(delta)
+		}
+		return m, nil
 	case modeBulkOrder:
 		if m.bulk != nil {
 			m.bulk.moveOrderCursor(delta)
@@ -1205,6 +1257,13 @@ func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
 func (m Model) handleSelectFilesAction() (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeMain:
+		if m.batchMode {
+			if !m.canBulkSelectFilesSelection() {
+				m.errText = "Mark at least one torrent that needs file selection"
+				return m, nil
+			}
+			return m.beginBulkFileSelectionSetup()
+		}
 		if !m.canSelectFilesFromSelection() {
 			m.errText = "Selected torrent is not ready for file selection"
 			return m, nil
@@ -1334,6 +1393,11 @@ func (m Model) handlePopupCancel() (tea.Model, tea.Cmd) {
 	case modeSelectFiles, modeChooseTarget:
 		m.mode = m.returnMode
 		return m, nil
+	case modeBulkSelectFiles:
+		m.mode = modeMain
+		m.bulkSelect = nil
+		m.errText = ""
+		return m, nil
 	case modeBulkOrder, modeBulkFiles, modeBulkConfirm:
 		m.mode = modeMain
 		m.bulk = nil
@@ -1420,6 +1484,20 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 		m.mode = modeBulkConfirm
 		m.errText = ""
 		return m, nil
+	case modeBulkSelectFiles:
+		if m.bulkSelect == nil {
+			return m, nil
+		}
+		if m.bulkSelect.selectedCurrentFileCount() == 0 {
+			m.errText = "Select at least one file"
+			return m, nil
+		}
+		nextStart := m.bulkSelect.Prompt + 1
+		if m.bulkSelect.prepareNextPrompt(nextStart) {
+			m.errText = ""
+			return m, nil
+		}
+		return m.startBulkFileSelectionSubmit()
 	case modeBulkConfirm:
 		if m.bulk == nil {
 			return m, nil
@@ -1520,6 +1598,47 @@ func (m Model) beginBulkDownloadSetup() (tea.Model, tea.Cmd) {
 	m.errText = ""
 	m.status = "Review bulk download order"
 	return m, nil
+}
+
+func (m Model) beginBulkFileSelectionSetup() (tea.Model, tea.Cmd) {
+	eligible, skipped := m.bulkFileSelectionCandidates()
+	if len(eligible) == 0 {
+		m.errText = "Mark at least one torrent that needs file selection"
+		return m, nil
+	}
+	m.bulkSelect = newBulkFileSelectionState(eligible, skipped)
+	m.returnMode = modeMain
+	m.mode = modeBulkSelectFiles
+	m.loading = true
+	m.errText = ""
+	m.status = "Loading bulk file selection details"
+	return m, bulkFileSelectionDetailsCmd(m.service, m.bulkSelect.Plans)
+}
+
+func (m Model) bulkFileSelectionCandidates() (eligible []models.Torrent, skipped []models.Torrent) {
+	for _, torrent := range m.visibleTorrents() {
+		if !m.batchSelected[torrent.ID] {
+			continue
+		}
+		if isFileSelectionStatus(torrent.Status) {
+			eligible = append(eligible, torrent)
+		} else {
+			skipped = append(skipped, torrent)
+		}
+	}
+	return eligible, skipped
+}
+
+func (m Model) startBulkFileSelectionSubmit() (tea.Model, tea.Cmd) {
+	if m.bulkSelect == nil {
+		return m, nil
+	}
+	submissions := m.bulkSelect.submissions()
+	m.mode = modeMain
+	m.loading = true
+	m.status = "Submitting bulk file selections"
+	m.errText = ""
+	return m, bulkFileSelectionSubmitCmd(m.service, submissions, m.bulkSelect.Outcomes)
 }
 
 func (m Model) startNextBulkItem() (tea.Model, tea.Cmd) {
