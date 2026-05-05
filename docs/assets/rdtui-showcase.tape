@@ -21,12 +21,12 @@ Env RDTUI_DEMO "1"
 Env RDTUI_DEMO_DOWNLOAD_DURATION "4s"
 
 Hide
-Type "export PS1='$ ' && go build -o bin/rdtui ./cmd/rdtui && export PATH=$PWD/bin:$PATH && clear"
+Type "export PS1='$ ' && go build -ldflags '-X github.com/m4rii0/rdtui/internal/version.Version=v0.0.0-preview' -o bin/rdtui-showcase ./cmd/rdtui && export PATH=$PWD/bin:$PATH && clear"
 Enter
 Wait+Line /\$/
 Show
 
-Type "rdtui"
+Type "rdtui-showcase"
 Enter
 Wait+Screen /Torrents/
 Sleep 1s

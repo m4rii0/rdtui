@@ -69,7 +69,7 @@ sha256sum --check checksums.txt
 make build
 ```
 
-This compiles the binary to `bin/rdtui` and embeds the current git version via ldflags. Dirty local builds use SemVer build metadata, for example `v1.2.3+dirty`.
+This compiles the binary to `bin/rdtui` and embeds the current git version via ldflags. Local builds default to `vX.Y.Z-shorthash`; dirty local builds append SemVer build metadata, for example `v1.2.3-abc1234+dirty`.
 
 For a plain build without version info:
 

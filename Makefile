@@ -6,7 +6,7 @@ BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 VHS ?= vhs
 VHS_TAPE ?= docs/assets/rdtui-showcase.tape
 VHS_BROWSER_LIB_DIR ?= $(HOME)/.cache/rdtui-vhs-libs/usr/lib/x86_64-linux-gnu
-VERSION ?= $(shell git describe --tags --always --dirty=+dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
+VERSION ?= $(shell latest_tag=$$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1); short_hash=$$(git rev-parse --short HEAD 2>/dev/null); dirty=$$(test -z "$$(git status --porcelain 2>/dev/null)" || printf '+dirty'); if [ -n "$$latest_tag" ] && [ -n "$$short_hash" ]; then printf '%s-%s%s' "$$latest_tag" "$$short_hash" "$$dirty"; elif [ -n "$$short_hash" ]; then printf 'v0.0.0-%s%s' "$$short_hash" "$$dirty"; else printf 'dev'; fi)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
 .PHONY: help build run run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-gif
