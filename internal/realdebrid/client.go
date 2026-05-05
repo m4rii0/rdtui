@@ -433,9 +433,13 @@ func parseTime(value string) time.Time {
 	if value == "" {
 		return time.Time{}
 	}
-	t, err := time.Parse(time.RFC3339, value)
-	if err == nil {
-		return t
+	if len(value) >= len("2006-01-02T15:04:05") {
+		for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+			t, err := time.ParseInLocation(layout, value[:len(layout)], time.Local)
+			if err == nil {
+				return t
+			}
+		}
 	}
 	return time.Time{}
 }

@@ -27,6 +27,18 @@ func TestTorrentMatchString(t *testing.T) {
 	}
 }
 
+func TestFormatAddedTimeUsesLocalTimezone(t *testing.T) {
+	loc := time.FixedZone("TEST", 2*60*60)
+	original := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = original })
+
+	got := formatAddedTime(time.Date(2026, 5, 5, 21, 23, 0, 0, time.UTC))
+	if got != "05/05/2026 23:23" {
+		t.Fatalf("formatAddedTime() = %q, want local time", got)
+	}
+}
+
 func TestTorrentMatchStringStatuses(t *testing.T) {
 	tests := []struct {
 		status string

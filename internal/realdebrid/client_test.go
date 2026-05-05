@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m4rii0/rdtui/internal/version"
 )
@@ -36,6 +37,32 @@ func TestClientUserSuccess(t *testing.T) {
 	}
 	if user.Username != "alice" {
 		t.Fatalf("username = %q, want alice", user.Username)
+	}
+}
+
+func TestParseTimeUsesLocalTimezoneWhenMissingOffset(t *testing.T) {
+	loc := time.FixedZone("TEST", 2*60*60)
+	original := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = original })
+
+	got := parseTime("2026-05-05T23:23:00")
+	want := time.Date(2026, 5, 5, 23, 23, 0, 0, loc)
+	if !got.Equal(want) || got.Location() != loc {
+		t.Fatalf("parseTime() = %v (%v), want %v (%v)", got, got.Location(), want, loc)
+	}
+}
+
+func TestParseTimeUsesLocalWallTimeWhenUTCMarked(t *testing.T) {
+	loc := time.FixedZone("TEST", 2*60*60)
+	original := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = original })
+
+	got := parseTime("2026-05-05T21:23:00Z")
+	want := time.Date(2026, 5, 5, 21, 23, 0, 0, loc)
+	if !got.Equal(want) || got.Location() != loc {
+		t.Fatalf("parseTime() = %v (%v), want %v (%v)", got, got.Location(), want, loc)
 	}
 }
 
