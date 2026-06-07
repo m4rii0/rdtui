@@ -311,7 +311,7 @@ func buildOptions(req models.ManagedDownloadRequest) *arigo.Options {
 		Continue:               true,
 		MaxConnectionPerServer: 16,
 		Split:                  16,
-		MinSplitSize:           1024 * 1024,
+		MinSplitSize:           "1M",
 	}
 }
 
@@ -396,7 +396,7 @@ func dialRPC(url string, secret string) (rpcClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rpcAdapter{client: &client}, nil
+	return &rpcAdapter{client: client}, nil
 }
 
 type execProcess struct {
