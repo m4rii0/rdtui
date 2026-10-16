@@ -246,13 +246,16 @@ func bulkFileSelectionSummaryLine(success, failed, skipped int) string {
 	return strings.Join(parts, ", ")
 }
 
-func bulkFileSelectionDetailsCmd(service app.AppService, plans []bulkFileSelectionPlan) tea.Cmd {
+func bulkFileSelectionDetailsCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, plans []bulkFileSelectionPlan) tea.Cmd {
 	ordered := slices.Clone(plans)
-	return func() tea.Msg {
+	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
 		details := make([]models.TorrentInfo, 0, len(ordered))
 		outcomes := make([]bulkFileSelectionOutcome, 0)
 		for _, plan := range ordered {
-			info, err := service.TorrentInfo(context.Background(), plan.ID)
+			if err := ctx.Err(); err != nil {
+				return bulkFileSelectionDetailsMsg{details: details, outcomes: outcomes, err: err}
+			}
+			info, err := service.TorrentInfo(ctx, plan.ID)
 			if err != nil {
 				outcomes = append(outcomes, bulkFileSelectionOutcome{ID: plan.ID, Name: plan.Name, Status: bulkFileSelectionFailed, Error: err.Error()})
 				continue
@@ -260,13 +263,16 @@ func bulkFileSelectionDetailsCmd(service app.AppService, plans []bulkFileSelecti
 			details = append(details, info)
 		}
 		return bulkFileSelectionDetailsMsg{details: details, outcomes: outcomes}
-	}
+	})
 }
 
-func bulkFileSelectionSubmitCmd(service app.AppService, submissions []bulkFileSelectionSubmission, outcomes []bulkFileSelectionOutcome) tea.Cmd {
+func bulkFileSelectionSubmitCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, submissions []bulkFileSelectionSubmission, outcomes []bulkFileSelectionOutcome) tea.Cmd {
 	ordered := slices.Clone(submissions)
+	for idx := range ordered {
+		ordered[idx].FileIDs = slices.Clone(ordered[idx].FileIDs)
+	}
 	baseOutcomes := slices.Clone(outcomes)
-	return func() tea.Msg {
+	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
 		result := bulkFileSelectionResultMsg{}
 		var details []string
 		for _, outcome := range baseOutcomes {
@@ -280,8 +286,12 @@ func bulkFileSelectionSubmitCmd(service app.AppService, submissions []bulkFileSe
 			}
 		}
 		for idx, submission := range ordered {
+			if err := ctx.Err(); err != nil {
+				result.err = err
+				return result
+			}
 			if idx > 0 {
-				if err := batchTick(context.Background()); err != nil {
+				if err := batchTick(ctx); err != nil {
 					result.failed += len(ordered) - idx
 					result.total += len(ordered) - idx
 					result.err = err
@@ -290,7 +300,7 @@ func bulkFileSelectionSubmitCmd(service app.AppService, submissions []bulkFileSe
 				}
 			}
 			result.total++
-			if err := service.SelectFiles(context.Background(), submission.ID, submission.FileIDs); err != nil {
+			if err := service.SelectFiles(ctx, submission.ID, submission.FileIDs); err != nil {
 				result.failed++
 				details = append(details, fmt.Sprintf("%s: %s", submission.Name, err.Error()))
 				continue
@@ -299,7 +309,7 @@ func bulkFileSelectionSubmitCmd(service app.AppService, submissions []bulkFileSe
 		}
 		result.detail = strings.Join(details, "\n")
 		return result
-	}
+	})
 }
 
 func renderBulkFileSelectionPopup(m Model) string {

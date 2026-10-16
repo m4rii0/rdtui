@@ -46,7 +46,7 @@ func TestScrollbarThumbFitsVisibleTrack(t *testing.T) {
 }
 
 func TestRenderViewHeightWithManyTorrents(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		width:         120,
 		height:        24,
@@ -83,7 +83,7 @@ func TestLongNamesDoNotWrap(t *testing.T) {
 		Added:    time.Now(),
 		Bytes:    1024,
 	}
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		width:         120,
 		height:        24,
@@ -165,7 +165,7 @@ func TestPadVisual(t *testing.T) {
 }
 
 func TestFootersMentionManagedDownload(t *testing.T) {
-	main := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
+	main := Model{runtime: newTestRuntime(t), mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
 	if got := ansi.Strip(listFooter(main)); !strings.Contains(got, "d download") {
 		t.Fatalf("listFooter() = %q, want managed download hint", got)
 	}
@@ -189,7 +189,7 @@ func TestVersionRenderersDoNotPrefixEmbeddedTag(t *testing.T) {
 }
 
 func TestListFooterDimsUnavailableActions(t *testing.T) {
-	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
+	m := Model{runtime: newTestRuntime(t), mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
 	got := ansi.Strip(listFooter(m))
 	if !strings.Contains(got, "d download") {
 		t.Fatalf("listFooter() = %q, should keep download visible for unfinished torrent", got)
@@ -200,7 +200,7 @@ func TestListFooterDimsUnavailableActions(t *testing.T) {
 }
 
 func TestSearchFooterHidesUnrelatedActions(t *testing.T) {
-	m := Model{mode: modeSearch}
+	m := Model{runtime: newTestRuntime(t), mode: modeSearch}
 	got := ansi.Strip(listFooter(m))
 	if !strings.Contains(got, "esc clear") || !strings.Contains(got, "enter keep") {
 		t.Fatalf("listFooter() = %q, want search actions", got)
@@ -213,7 +213,7 @@ func TestSearchFooterHidesUnrelatedActions(t *testing.T) {
 func TestBrowserEditingFooterShowsOnlyEditingShortcuts(t *testing.T) {
 	b := newFileBrowser(".")
 	b.startEditing()
-	m := Model{mode: modeFileBrowser, browser: b}
+	m := Model{runtime: newTestRuntime(t), mode: modeFileBrowser, browser: b}
 	footer := ansi.Strip(renderShortcutFooter(m.renderShortcutDefs(), m))
 	if strings.Contains(footer, "hidden") || strings.Contains(footer, "visual") {
 		t.Fatalf("footer = %q, should hide normal browser actions while editing", footer)
@@ -225,7 +225,7 @@ func TestBrowserEditingFooterShowsOnlyEditingShortcuts(t *testing.T) {
 
 func TestBrowserFooterKeepsImportVisibleWhenUnavailable(t *testing.T) {
 	b := newFileBrowser(".")
-	m := Model{mode: modeFileBrowser, browser: b}
+	m := Model{runtime: newTestRuntime(t), mode: modeFileBrowser, browser: b}
 	footer := ansi.Strip(renderShortcutFooter(m.renderShortcutDefs(), m))
 	if !strings.Contains(footer, "ctrl+s import") {
 		t.Fatalf("footer = %q, want import shortcut visible", footer)
@@ -233,7 +233,7 @@ func TestBrowserFooterKeepsImportVisibleWhenUnavailable(t *testing.T) {
 }
 
 func TestConstrainedInputViewShowsTailOfLongMagnet(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMagnetInput
 	m.input.SetValue("magnet:?xt=urn:btih:" + strings.Repeat("a", 80) + "restofthestring")
 	m.input.CursorEnd()
@@ -248,7 +248,7 @@ func TestConstrainedInputViewShowsTailOfLongMagnet(t *testing.T) {
 }
 
 func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMagnetInput
 	m.width = 100
 	m.height = 24
@@ -264,7 +264,7 @@ func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
 }
 
 func TestBatchFooterShowsBulkDownloadActionWhenUnavailable(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -280,7 +280,7 @@ func TestBatchFooterShowsBulkDownloadActionWhenUnavailable(t *testing.T) {
 }
 
 func TestBatchFooterShowsBulkFileSelectionActionWhenUnavailable(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -296,7 +296,7 @@ func TestBatchFooterShowsBulkFileSelectionActionWhenUnavailable(t *testing.T) {
 }
 
 func TestRenderBulkFileSelectionPopup(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:   modeBulkSelectFiles,
 		width:  100,
 		height: 24,
@@ -320,7 +320,7 @@ func TestRenderBulkFileSelectionPopup(t *testing.T) {
 }
 
 func TestRenderBulkOrderPopup(t *testing.T) {
-	m := Model{mode: modeBulkOrder, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
+	m := Model{runtime: newTestRuntime(t), mode: modeBulkOrder, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
 	view := ansi.Strip(renderBulkOrderPopup(m))
 	if !strings.Contains(view, "Bulk Download Order") || !strings.Contains(view, "Movie A") {
 		t.Fatalf("bulk order popup = %q", view)
@@ -328,7 +328,7 @@ func TestRenderBulkOrderPopup(t *testing.T) {
 }
 
 func TestRenderBulkSummaryView(t *testing.T) {
-	m := Model{mode: modeBulkDownload, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
+	m := Model{runtime: newTestRuntime(t), mode: modeBulkDownload, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}})}
 	m.bulk.Items = []bulkQueueItem{
 		{TorrentID: "a", TorrentName: "Movie A", Status: bulkFileSuccess},
 		{TorrentID: "b", TorrentName: "Movie B", Status: bulkFileFailed, Error: "network"},
@@ -340,7 +340,7 @@ func TestRenderBulkSummaryView(t *testing.T) {
 }
 
 func TestRenderBulkProgressShowsMovingQueue(t *testing.T) {
-	m := Model{mode: modeBulkDownload, width: 110, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}, {ID: "c", Filename: "Movie C"}, {ID: "d", Filename: "Movie D"}})}
+	m := Model{runtime: newTestRuntime(t), mode: modeBulkDownload, width: 110, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}, {ID: "b", Filename: "Movie B"}, {ID: "c", Filename: "Movie C"}, {ID: "d", Filename: "Movie D"}})}
 	m.bulk.Items = []bulkQueueItem{
 		{TorrentID: "a", TorrentName: "Movie A", Target: models.DownloadTarget{Label: "a.mkv"}, Status: bulkFileSuccess},
 		{TorrentID: "b", TorrentName: "Movie B", Target: models.DownloadTarget{Label: "b.mkv"}, Status: bulkFileActive},
@@ -385,7 +385,7 @@ func TestRenderBulkQueueKeepsCurrentVisibleAndBounded(t *testing.T) {
 }
 
 func TestRenderBulkCleanupWarning(t *testing.T) {
-	m := Model{mode: modeBulkCleanup, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}})}
+	m := Model{runtime: newTestRuntime(t), mode: modeBulkCleanup, width: 100, height: 24, bulk: newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}})}
 	m.bulk.Items = []bulkQueueItem{{TorrentID: "a", TorrentName: "Movie A", Status: bulkFileFailed, Error: "network"}}
 	m.bulk.CleanupSelected = map[string]bool{"a": true}
 	view := ansi.Strip(renderBulkCleanupPopup(m))
@@ -395,7 +395,7 @@ func TestRenderBulkCleanupWarning(t *testing.T) {
 }
 
 func TestHelpOverlayKeepsUnavailableMainActionsVisible(t *testing.T) {
-	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
+	m := Model{runtime: newTestRuntime(t), mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "queued"}}, selectedIdx: 0}
 	got := ansi.Strip(renderHelpOverlay(m))
 	if !strings.Contains(got, "y  copy") || !strings.Contains(got, "d  download") {
 		t.Fatalf("help overlay = %q, want unavailable actions still listed", got)
@@ -417,7 +417,7 @@ func TestDownloadFooterKeepsCompletionActionsVisibleWhileActive(t *testing.T) {
 }
 
 func TestOverwriteModalShowsByteDiff(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:  modeOverwrite,
 		width: 120,
 		pendingDownload: &pendingDownloadState{

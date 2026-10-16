@@ -65,7 +65,7 @@ func TestSortTorrentsPreservesTieBreakers(t *testing.T) {
 }
 
 func TestApplyFilterCopiesUnfilteredTorrents(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.sortColumn = colName
 	m.sortAscending = true
 	m.torrents = []models.Torrent{{ID: "b", Filename: "b"}, {ID: "a", Filename: "a"}}
@@ -85,7 +85,7 @@ func TestApplyFilterCopiesUnfilteredTorrents(t *testing.T) {
 }
 
 func TestSortByColumnPreservesSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -110,7 +110,7 @@ func TestSortByColumnPreservesSelection(t *testing.T) {
 }
 
 func TestSortTogglesDirection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -138,7 +138,7 @@ func TestSortTogglesDirection(t *testing.T) {
 }
 
 func TestSortDifferentColumnResetsDirection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: true,
 		torrents: []models.Torrent{
@@ -159,7 +159,7 @@ func TestSortDifferentColumnResetsDirection(t *testing.T) {
 }
 
 func TestDefaultSortState(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	if m.sortColumn != colAdded {
 		t.Fatalf("default sortColumn = %d, want colAdded", m.sortColumn)
 	}
@@ -169,7 +169,7 @@ func TestDefaultSortState(t *testing.T) {
 }
 
 func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -199,7 +199,7 @@ func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
 }
 
 func TestAddTorrentFocusesNewTorrentAfterRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeURLInput,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -235,7 +235,7 @@ func TestAddTorrentFocusesNewTorrentAfterRefresh(t *testing.T) {
 }
 
 func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeFileBrowser,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -268,7 +268,7 @@ func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
 }
 
 func TestPendingFocusWaitsUntilTorrentAppears(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -309,7 +309,7 @@ func TestStatusRankOrdering(t *testing.T) {
 }
 
 func TestCanSelectFilesIncludesMagnetConversion(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:        modeMain,
 		torrents:    []models.Torrent{{ID: "a", Status: "magnet_conversion"}},
 		selectedIdx: 0,
@@ -343,7 +343,7 @@ func TestCompareByColumn(t *testing.T) {
 }
 
 func TestEnterOpensDetailView(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -364,7 +364,7 @@ func TestEnterOpensDetailView(t *testing.T) {
 }
 
 func TestEnterWithCachedDetail(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -386,7 +386,7 @@ func TestEnterWithCachedDetail(t *testing.T) {
 }
 
 func TestEscapeReturnsToList(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDetail,
 		returnMode: modeMain,
 		sortColumn: colAdded,
@@ -404,7 +404,7 @@ func TestEscapeReturnsToList(t *testing.T) {
 }
 
 func TestShiftLetterSortShortcuts(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -436,7 +436,7 @@ func TestShiftLetterSortShortcuts(t *testing.T) {
 }
 
 func TestDeleteFromMainView(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		returnMode:    modeMain,
 		sortColumn:    colAdded,
@@ -459,7 +459,7 @@ func TestDeleteFromMainView(t *testing.T) {
 }
 
 func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		returnMode: modeMain,
 		torrents: []models.Torrent{
@@ -486,7 +486,7 @@ func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
 }
 
 func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDetail,
 		returnMode: modeDetail,
 		detail: &models.TorrentInfo{
@@ -509,7 +509,7 @@ func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
 }
 
 func TestManagedDownloadMsgEntersDownloadMode(t *testing.T) {
-	m := Model{returnMode: modeDetail}
+	m := Model{runtime: newTestRuntime(t), returnMode: modeDetail}
 
 	updated, cmd := m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}})
 	m = updated.(Model)
@@ -531,7 +531,7 @@ func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+	m := Model{runtime: newTestRuntime(t), mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
 
 	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
 	m = updated.(Model)
@@ -554,7 +554,7 @@ func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
 
 func TestResolvedDownloadStartsImmediatelyWhenFileMissing(t *testing.T) {
 	dir := t.TempDir()
-	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+	m := Model{runtime: newTestRuntime(t), mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
 
 	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
 	m = updated.(Model)
@@ -570,7 +570,7 @@ func TestResolvedDownloadStartsImmediatelyWhenFileMissing(t *testing.T) {
 }
 
 func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeOverwrite,
 		returnMode: modeDetail,
 		pendingDownload: &pendingDownloadState{
@@ -589,7 +589,7 @@ func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
 }
 
 func TestManagedDownloadStatusMsgMarksCompletion(t *testing.T) {
-	m := Model{mode: modeDownload, download: &models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}
+	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: &models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}
 
 	updated, _ := m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusComplete}})
 	m = updated.(Model)
@@ -602,7 +602,7 @@ func TestManagedDownloadStatusMsgMarksCompletion(t *testing.T) {
 }
 
 func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
-	m := Model{mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
+	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 
 	updated, _ := m.Update(downloadPathMsg{action: "reveal"})
 	m = updated.(Model)
@@ -612,7 +612,7 @@ func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
 }
 
 func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:              modeDownload,
 		returnMode:        modeDetail,
 		download:          &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete},
@@ -633,7 +633,7 @@ func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
 }
 
 func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDelete,
 		returnMode: modeDetail,
 		deleteIDs:  []string{"a"},
@@ -647,7 +647,7 @@ func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 }
 
 func TestDeleteSuccessReturnsToMain(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDelete,
 		returnMode: modeDetail,
 		deleteIDs:  []string{"a"},
@@ -661,7 +661,7 @@ func TestDeleteSuccessReturnsToMain(t *testing.T) {
 }
 
 func TestModalReturnsToReturnMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeSelectFiles,
 		returnMode: modeDetail,
 		selector:   selectFilesState{Files: []models.TorrentFile{}, Selected: map[int]bool{}},
@@ -675,7 +675,7 @@ func TestModalReturnsToReturnMode(t *testing.T) {
 }
 
 func TestBatchModeToggle(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -703,7 +703,7 @@ func TestBatchModeToggle(t *testing.T) {
 }
 
 func TestBatchSpaceTogglesMark(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -729,7 +729,7 @@ func TestBatchSpaceTogglesMark(t *testing.T) {
 }
 
 func TestBatchDeleteEntersConfirmation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		batchMode:  true,
 		sortColumn: colAdded,
@@ -752,7 +752,7 @@ func TestBatchDeleteEntersConfirmation(t *testing.T) {
 }
 
 func TestBatchEscapeClearsSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -769,7 +769,7 @@ func TestBatchEscapeClearsSelection(t *testing.T) {
 }
 
 func TestSelectAllTorrents(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		batchMode:  true,
 		sortColumn: colAdded,
@@ -789,7 +789,7 @@ func TestSelectAllTorrents(t *testing.T) {
 }
 
 func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn: colAdded,
 		torrents: []models.Torrent{
 			{ID: "c", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
@@ -808,7 +808,7 @@ func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
 }
 
 func TestMainDownloadFetchesDetailWhenSelectionIsReady(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		returnMode:    modeMain,
 		sortColumn:    colAdded,
@@ -836,7 +836,7 @@ func TestMainDownloadFetchesDetailWhenSelectionIsReady(t *testing.T) {
 }
 
 func TestHelpOverlayTogglesWithoutChangingContext(t *testing.T) {
-	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
+	m := Model{runtime: newTestRuntime(t), mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	m = updated.(Model)
@@ -860,7 +860,7 @@ func TestHelpOverlayTogglesWithoutChangingContext(t *testing.T) {
 func TestBrowserEditingQuestionMarkStaysInInput(t *testing.T) {
 	b := newFileBrowser(".")
 	b.startEditing()
-	m := Model{mode: modeFileBrowser, browser: b}
+	m := Model{runtime: newTestRuntime(t), mode: modeFileBrowser, browser: b}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	m = updated.(Model)
@@ -873,7 +873,7 @@ func TestBrowserEditingQuestionMarkStaysInInput(t *testing.T) {
 }
 
 func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -900,7 +900,7 @@ func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
 }
 
 func TestBulkDownloadEligibilityRequiresTwoDownloadedSelections(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -929,7 +929,7 @@ func TestBulkDownloadEligibilityRequiresTwoDownloadedSelections(t *testing.T) {
 }
 
 func TestBulkDownloadStartsInVisibleOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -956,7 +956,7 @@ func TestBulkDownloadStartsInVisibleOrder(t *testing.T) {
 }
 
 func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode: modeBulkOrder,
 		bulk: newBulkDownloadState([]models.Torrent{
 			{ID: "a", Filename: "single"},
@@ -995,7 +995,7 @@ func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
 }
 
 func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeBulkConfirm,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true, "b": true},
@@ -1023,7 +1023,7 @@ func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
 }
 
 func TestBulkQueueContinuesAfterFailure(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeBulkDownload,
 		returnMode: modeBulkDownload,
 		bulk:       newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
@@ -1060,7 +1060,7 @@ func TestBulkQueueContinuesAfterFailure(t *testing.T) {
 
 func TestBulkStatusTransportFailureWaitsForSameDownload(t *testing.T) {
 	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:     modeMain,
 		download: new(active),
 		bulk:     newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
@@ -1100,7 +1100,7 @@ func TestBulkStatusTransportFailureWaitsForSameDownload(t *testing.T) {
 
 func TestSingleStatusTransportFailureKeepsPolling(t *testing.T) {
 	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
-	m := Model{mode: modeDownload, download: new(active), status: "Downloading"}
+	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: new(active), status: "Downloading"}
 	updated, cmd := m.Update(managedDownloadStatusMsg{ok: true, download: active, err: errors.New("temporary status transport failure")})
 	m = updated.(Model)
 	if cmd != nil || m.status != "Downloading" || *m.download != active {
@@ -1113,7 +1113,7 @@ func TestSingleStatusTransportFailureKeepsPolling(t *testing.T) {
 }
 
 func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode: modeBulkDownload,
 		bulk: newBulkDownloadState([]models.Torrent{
 			{ID: "a", Filename: "complete"},
@@ -1146,7 +1146,7 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 }
 
 func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:        modeBulkDownload,
 		downloadDir: t.TempDir(),
 		download:    &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
@@ -1223,7 +1223,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 }
 
 func TestBulkSelectFilesStartsWithEligibleAndSkippedSelections(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -1256,7 +1256,7 @@ func TestBulkSelectFilesStartsWithEligibleAndSkippedSelections(t *testing.T) {
 }
 
 func TestBulkSelectFilesRejectsSelectionWithNoEligibleTorrents(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		torrents:      []models.Torrent{{ID: "a", Filename: "ready", Status: "downloaded"}},
@@ -1274,7 +1274,7 @@ func TestBulkSelectFilesRejectsSelectionWithNoEligibleTorrents(t *testing.T) {
 }
 
 func TestBulkSelectFilesUsesFilteredVisibleOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		filterApplied: true,
@@ -1298,7 +1298,7 @@ func TestBulkSelectFilesUsesFilteredVisibleOrder(t *testing.T) {
 }
 
 func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeBulkSelectFiles,
 		batchMode:  true,
 		bulkSelect: newBulkFileSelectionState([]models.Torrent{{ID: "a", Filename: "alpha"}}, nil),
@@ -1331,7 +1331,7 @@ func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) 
 }
 
 func TestBulkSelectFilesCancelKeepsBatchSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeBulkSelectFiles,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -1353,7 +1353,7 @@ func TestBulkSelectFilesSubmitsSequentiallyAndReportsPartialFailure(t *testing.T
 		selectErr: map[string]error{"b": errors.New("denied")},
 		selected:  map[string][]int{},
 	}
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeBulkSelectFiles,
 		service:       service,
 		batchMode:     true,

@@ -26,7 +26,7 @@ type Service struct {
 	downloads *DownloadCoordinator
 }
 
-func New() (*Service, error) {
+func New(parent context.Context) (*Service, error) {
 	store, err := config.NewStore()
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func New() (*Service, error) {
 		store:     store,
 		config:    cfg,
 		auth:      auth.NewManager(store, cfg),
-		downloads: NewDownloadCoordinator(context.Background(), newDownloadManager(cfg), cfg.DefaultDownloadDir),
+		downloads: NewDownloadCoordinator(parent, newDownloadManager(cfg), cfg.DefaultDownloadDir),
 	}, nil
 }
 
@@ -113,6 +113,11 @@ func (s *Service) ImportTorrentFiles(ctx context.Context, paths []string) []mode
 	results := make([]models.ImportResult, 0, len(paths))
 	for _, path := range paths {
 		res := models.ImportResult{Source: path}
+		if err := ctx.Err(); err != nil {
+			res.Err = err
+			results = append(results, res)
+			continue
+		}
 		added, err := s.client.AddTorrentPath(ctx, path)
 		if err != nil {
 			res.Err = err
@@ -217,6 +222,11 @@ func (s *Service) RevealInDirectory(path string) error {
 func (s *Service) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	return s.CloseContext(ctx)
+}
+
+// CloseContext lets composition share its cleanup budget with runtime draining.
+func (s *Service) CloseContext(ctx context.Context) error {
 	return s.downloads.Close(ctx)
 }
 

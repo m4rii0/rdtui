@@ -35,6 +35,21 @@ func TestValidTorrentFilesFiltersAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestImportTorrentFilesStopsBeforeReadingCanceledWork(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	svc := &Service{}
+	results := svc.ImportTorrentFiles(ctx, []string{"unstarted-a.torrent", "unstarted-b.torrent"})
+	if len(results) != 2 {
+		t.Fatalf("results = %v", results)
+	}
+	for _, result := range results {
+		if !errors.Is(result.Err, context.Canceled) {
+			t.Fatalf("unstarted import = %+v", result)
+		}
+	}
+}
+
 func TestStartManagedDownloadUsesConfiguredDirAndFilename(t *testing.T) {
 	t.Parallel()
 

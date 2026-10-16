@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
@@ -21,12 +25,20 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	root := newRootCommand(context.Background(), stdout, commandHandlers{
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	runtime := app.NewRuntime(ctx)
+	defer runtime.Stop()
+	root := newRootCommand(runtime.Context(), stdout, commandHandlers{
 		runTUI: func() error {
-			return runTUI()
+			return runTUI(ctx, runtime)
 		},
-		checkUpdate: runCheckUpdate,
-		update:      runUpdate,
+		checkUpdate: func(ctx context.Context, stdout io.Writer) error {
+			return runtime.Do(ctx, func(ctx context.Context) error { return runCheckUpdate(ctx, stdout) })
+		},
+		update: func(ctx context.Context, stdout io.Writer, opts updateOptions) error {
+			return runtime.Do(ctx, func(ctx context.Context) error { return runUpdate(ctx, stdout, opts) })
+		},
 	})
 	root.SetArgs(args)
 	root.SetOut(stdout)
@@ -45,26 +57,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runTUI() error {
+func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 	var service app.AppService
+	var closeService func(context.Context) error
 	if os.Getenv("RDTUI_DEMO") == "1" {
 		service = demo.NewService()
 	} else {
-		svc, err := app.New()
+		svc, err := app.New(runtime.Context())
 		if err != nil {
 			return fmt.Errorf("failed to initialize app: %w", err)
 		}
-		defer func() {
-			_ = svc.Close()
-		}()
+		closeService = svc.CloseContext
 		service = svc
 	}
+	defer func() { err = errors.Join(err, cleanupRuntime(runtime, closeService)) }()
 
-	program := tea.NewProgram(tui.NewModel(service))
+	program := tea.NewProgram(tui.NewModel(service, runtime), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("rdtui error: %w", err)
 	}
 	return nil
+}
+
+func cleanupRuntime(runtime *app.Runtime, closeService func(context.Context) error) error {
+	runtime.Stop()
+	// Shutdown must not inherit the canceled signal/program context.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var closeErr error
+	if closeService != nil {
+		closeErr = closeService(ctx)
+	}
+	return errors.Join(closeErr, runtime.Wait(ctx))
 }
 
 func printVersion(stdout io.Writer) error {

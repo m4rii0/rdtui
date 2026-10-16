@@ -94,7 +94,7 @@ func TestFilterTorrentsFuzzy(t *testing.T) {
 }
 
 func TestSlashEntersSearchMode(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMain
 	m.torrents = []models.Torrent{
 		{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
@@ -113,7 +113,7 @@ func TestSlashEntersSearchMode(t *testing.T) {
 }
 
 func TestSlashPreservesQueryWhenFilterApplied(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMain
 	m.torrents = []models.Torrent{
 		{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
@@ -133,7 +133,7 @@ func TestSlashPreservesQueryWhenFilterApplied(t *testing.T) {
 }
 
 func TestEscapeClearsFilter(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -165,7 +165,7 @@ func TestEscapeClearsFilter(t *testing.T) {
 }
 
 func TestEnterKeepsFilter(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -199,7 +199,7 @@ func TestEnterKeepsFilter(t *testing.T) {
 }
 
 func TestEnterWithEmptyQueryClearsFilter(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -222,7 +222,7 @@ func TestEnterWithEmptyQueryClearsFilter(t *testing.T) {
 }
 
 func TestSelectedIdxClampedAfterFilter(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -250,7 +250,7 @@ func TestSelectedIdxClampedAfterFilter(t *testing.T) {
 }
 
 func TestFilteredResultsRespectSortOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colName,
 		sortAscending: true,
@@ -275,7 +275,7 @@ func TestFilteredResultsRespectSortOrder(t *testing.T) {
 }
 
 func TestVisibleTorrentsReturnsFullListWhenNoFilter(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:     modeMain,
 		torrents: []models.Torrent{{ID: "a"}, {ID: "b"}},
 	}
@@ -286,7 +286,7 @@ func TestVisibleTorrentsReturnsFullListWhenNoFilter(t *testing.T) {
 }
 
 func TestVisibleTorrentsReturnsFilteredList(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:             modeMain,
 		filterApplied:    true,
 		torrents:         []models.Torrent{{ID: "a"}, {ID: "b"}, {ID: "c"}},
@@ -397,7 +397,7 @@ func TestSelectedSearchMatchDoesNotLeakANSICodes(t *testing.T) {
 }
 
 func TestApplyFilterPopulatesMatchMap(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -407,7 +407,7 @@ func TestApplyFilterPopulatesMatchMap(t *testing.T) {
 		},
 		selectedIdx: 0,
 	}
-	m.searchInput = NewModel(nil).searchInput
+	m.searchInput = NewModel(nil, newTestRuntime(t)).searchInput
 	m.searchInput.SetValue("alpha")
 	m.applyFilter()
 
@@ -423,7 +423,7 @@ func TestApplyFilterPopulatesMatchMap(t *testing.T) {
 }
 
 func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeSearch,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -432,7 +432,7 @@ func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
 		},
 		selectedIdx: 0,
 	}
-	m.searchInput = NewModel(nil).searchInput
+	m.searchInput = NewModel(nil, newTestRuntime(t)).searchInput
 	m.searchInput.Reset()
 	m.applyFilter()
 
@@ -442,7 +442,7 @@ func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
 }
 
 func TestSearchTypingJKDoesNotNavigate(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMain
 	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
 	m.selectedIdx = 0
@@ -463,7 +463,7 @@ func TestSearchTypingJKDoesNotNavigate(t *testing.T) {
 }
 
 func TestSearchQuestionMarkStaysInInput(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(nil, newTestRuntime(t))
 	m.mode = modeMain
 	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
 
