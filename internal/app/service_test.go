@@ -128,6 +128,29 @@ func TestStartManagedDownloadRefreshesCompletionWithoutPolling(t *testing.T) {
 	}
 }
 
+func TestIdentityStartRefreshesUnobservedCompletion(t *testing.T) {
+	fake := &fakeDownloadManager{
+		startDownload: func(_ context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+			return models.ManagedDownload{GID: req.Filename, Status: models.ManagedDownloadStatusActive}, nil
+		},
+		downloadStatus: func(_ context.Context, gid string) (models.ManagedDownload, error) {
+			return models.ManagedDownload{GID: gid, Status: models.ManagedDownloadStatusComplete}, nil
+		},
+	}
+	svc := serviceWithBackend(t, fake)
+	first, err := svc.Start(t.Context(), "https://example.com/first.zip", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Start(t.Context(), "https://example.com/second.zip", "")
+	if err != nil || second.Reused || second.Snapshot.Ref.Generation <= first.Snapshot.Ref.Generation || second.Snapshot.Ref.GID != "second.zip" {
+		t.Fatalf("reopened unobserved completion: %+v, %v", second, err)
+	}
+	if _, err := svc.Status(t.Context(), first.Snapshot.Ref); !errors.Is(err, ErrStaleDownload) {
+		t.Fatalf("old reference accepted: %v", err)
+	}
+}
+
 func TestManagedDownloadStatusPreservesCachedMetadata(t *testing.T) {
 	t.Parallel()
 

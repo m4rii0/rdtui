@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
@@ -22,9 +23,10 @@ type Service struct {
 	torrents []torrentEntry
 	nextID   int
 
-	activeDownload   *models.ManagedDownload
-	downloadStart    time.Time
-	downloadDuration time.Duration
+	activeDownload     *models.ManagedDownload
+	downloadGeneration uint64
+	downloadStart      time.Time
+	downloadDuration   time.Duration
 }
 
 type torrentEntry struct {
@@ -227,6 +229,10 @@ func (s *Service) CopyURL(_ string) (bool, error) {
 func (s *Service) StartManagedDownload(_ context.Context, url, filename string) (models.ManagedDownloadStart, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.startDownloadLocked(url, filename)
+}
+
+func (s *Service) startDownloadLocked(url, filename string) (models.ManagedDownloadStart, error) {
 
 	if s.activeDownload != nil && !s.activeDownload.IsTerminal() {
 		return models.ManagedDownloadStart{Download: *s.activeDownload, Reused: true}, nil
@@ -241,6 +247,7 @@ func (s *Service) StartManagedDownload(_ context.Context, url, filename string) 
 		Directory:   "/tmp/rdtui-demo",
 	}
 	s.activeDownload = &dl
+	s.downloadGeneration++
 	s.downloadStart = time.Now()
 	return models.ManagedDownloadStart{Download: dl}, nil
 }
@@ -248,6 +255,10 @@ func (s *Service) StartManagedDownload(_ context.Context, url, filename string) 
 func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownload, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.downloadStatusLocked()
+}
+
+func (s *Service) downloadStatusLocked() (models.ManagedDownload, bool, error) {
 
 	if s.activeDownload == nil {
 		return models.ManagedDownload{}, false, nil
@@ -265,6 +276,30 @@ func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownlo
 	}
 
 	return *s.activeDownload, true, nil
+}
+
+func (s *Service) Start(ctx context.Context, url, filename string) (app.DownloadStart, error) {
+	// Keep admission and reference capture under the same lock.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return app.DownloadStart{}, err
+	}
+	result, err := s.startDownloadLocked(url, filename)
+	return app.DownloadStart{Snapshot: app.DownloadSnapshot{Ref: app.DownloadRef{Generation: s.downloadGeneration, GID: result.Download.GID}, Download: result.Download}, Reused: result.Reused}, err
+}
+
+func (s *Service) Status(ctx context.Context, ref app.DownloadRef) (app.DownloadSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return app.DownloadSnapshot{}, err
+	}
+	if s.activeDownload == nil || ref != (app.DownloadRef{Generation: s.downloadGeneration, GID: s.activeDownload.GID}) {
+		return app.DownloadSnapshot{}, app.ErrStaleDownload
+	}
+	download, _, err := s.downloadStatusLocked()
+	return app.DownloadSnapshot{Ref: ref, Download: download}, err
 }
 
 func demoDownloadDuration() time.Duration {

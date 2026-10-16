@@ -126,7 +126,8 @@ func (m *Model) queueSelectedDetailAction(action shortcutAction) (tea.Model, tea
 		return *m, nil
 	}
 	m.pendingAction = &pendingShortcutAction{torrentID: id, action: action}
-	return *m, detailCmd(m.runtime.Context(), m.runtime, m.service, id)
+	cmd := m.requestDetail(id)
+	return *m, cmd
 }
 
 func (m *Model) consumePendingDetailAction(id string) (shortcutAction, bool) {

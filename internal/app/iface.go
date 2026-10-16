@@ -28,6 +28,8 @@ type AppService interface {
 	CopyURL(url string) (bool, error)
 	StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error)
 	ManagedDownloadStatus(ctx context.Context) (models.ManagedDownload, bool, error)
+	Start(ctx context.Context, url, filename string) (DownloadStart, error)
+	Status(ctx context.Context, ref DownloadRef) (DownloadSnapshot, error)
 
 	SavePrivateToken(token string) error
 	OpenFile(path string) error

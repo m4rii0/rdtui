@@ -185,12 +185,7 @@ func (s *Service) CopyURL(url string) (bool, error) {
 }
 
 func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
-	if current, ok := s.downloads.Current(); ok && !current.Download.IsTerminal() {
-		// Legacy callers can stop polling when leaving the download view. Refresh
-		// before reuse, but let the coordinator retain ownership on query errors.
-		_, _ = s.downloads.Status(ctx, current.Ref)
-	}
-	started, err := s.downloads.Start(ctx, url, filename)
+	started, err := s.Start(ctx, url, filename)
 	if err != nil {
 		return models.ManagedDownloadStart{}, err
 	}
@@ -204,6 +199,20 @@ func (s *Service) ManagedDownloadStatus(ctx context.Context) (models.ManagedDown
 	}
 	status, err := s.downloads.Status(ctx, current.Ref)
 	return status.Download, true, err
+}
+
+// Start and Status preserve coordinator identity across the UI boundary.
+func (s *Service) Start(ctx context.Context, url, filename string) (DownloadStart, error) {
+	if current, ok := s.downloads.Current(); ok && !current.Download.IsTerminal() {
+		// Refresh unobserved completion before reuse. Query errors do not release
+		// the coordinator's active slot or authorize a duplicate transfer.
+		_, _ = s.downloads.Status(ctx, current.Ref)
+	}
+	return s.downloads.Start(ctx, url, filename)
+}
+
+func (s *Service) Status(ctx context.Context, ref DownloadRef) (DownloadSnapshot, error) {
+	return s.downloads.Status(ctx, ref)
 }
 
 func (s *Service) SavePrivateToken(token string) error {
