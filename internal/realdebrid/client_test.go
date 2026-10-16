@@ -1,12 +1,15 @@
 package realdebrid
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -291,6 +294,202 @@ func TestErrorResponseJSONOmitsZeroCode(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenSourceUsedForEveryAuthenticatedRequest(t *testing.T) {
+	authorizations := make(chan string, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case authorizations <- r.Header.Get("Authorization"):
+		default:
+			t.Error("unexpected extra request")
+		}
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusCreated)
+		}
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(server.Close)
+	sourceCalls := 0
+	client := NewClient("stale-token", server.URL, server.URL,
+		WithHTTPClient(server.Client()),
+		WithTokenSource(func(ctx context.Context) (string, error) {
+			if ctx != t.Context() {
+				t.Error("token source did not receive request context")
+			}
+			sourceCalls++
+			return "refreshed-token-" + strconv.Itoa(sourceCalls), nil
+		}))
+	for range 2 {
+		if _, err := client.User(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := client.AddTorrentFile(t.Context(), "example.torrent", []byte("torrent data")); err != nil {
+		t.Fatal(err)
+	}
+	if len(authorizations) != 3 {
+		t.Fatalf("requests = %d, want 3", len(authorizations))
+	}
+	for _, want := range []string{"Bearer refreshed-token-1", "Bearer refreshed-token-2", "Bearer refreshed-token-3"} {
+		if got := <-authorizations; got != want {
+			t.Errorf("Authorization = %q, want %q", got, want)
+		}
+	}
+	if sourceCalls != 3 {
+		t.Fatalf("token source calls = %d, want 3", sourceCalls)
+	}
+}
+
+func TestTokenSourceCancellationStopsRequest(t *testing.T) {
+	for _, sourceErr := range []error{context.Canceled, errors.New("credentials unavailable")} {
+		t.Run(sourceErr.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			requests := 0
+			client := NewClient("fallback-must-not-be-used", "", "",
+				WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					requests++
+					return nil, errors.New("unexpected request")
+				})}),
+				WithTokenSource(func(sourceCtx context.Context) (string, error) {
+					if sourceCtx != ctx {
+						t.Error("token source did not receive request context")
+					}
+					if errors.Is(sourceErr, context.Canceled) {
+						cancel()
+						<-sourceCtx.Done()
+						return "", sourceCtx.Err()
+					}
+					return "", sourceErr
+				}))
+			_, err := client.User(ctx)
+			if !errors.Is(err, sourceErr) || requests != 0 {
+				t.Fatalf("User() error = %v, requests = %d", err, requests)
+			}
+		})
+	}
+}
+
+func TestOAuthClientDoesNotInvokeTokenSource(t *testing.T) {
+	sourceCalls, handlerCalls, requests := 0, 0, 0
+	client := NewClient("must-not-leak", "", "",
+		WithTokenSource(func(context.Context) (string, error) {
+			sourceCalls++
+			return "", errors.New("recursive token lookup")
+		}),
+		WithAuthErrorHandler(func(string, *APIError) error { handlerCalls++; return nil }),
+		WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Errorf("OAuth Authorization = %q", got)
+			}
+			return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(`{"error":"Bad token","error_code":8}`))}, nil
+		})}))
+	_, _ = client.StartDeviceAuth(t.Context(), "")
+	_, _, _ = client.PollDeviceCredentials(t.Context(), "client", "device")
+	_, _ = client.ExchangeDeviceToken(t.Context(), "client", "secret", "device")
+	_, _ = client.RefreshToken(t.Context(), "client", "secret", "refresh")
+	if sourceCalls != 0 || handlerCalls != 0 || requests != 4 {
+		t.Fatalf("source calls = %d, handler calls = %d, requests = %d", sourceCalls, handlerCalls, requests)
+	}
+}
+
+func TestAPIErrorPreservesStatusAndCode(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, message, wantError string
+		status, code                   int
+	}{
+		{"unauthorized", `{"error":"Bad token","error_code":8}`, "Bad token", "real-debrid error 401 (8): Bad token", 401, 8},
+		{"rate limit", `{"error":"Too many requests","error_code":5}`, "Too many requests", "real-debrid error 429 (5): Too many requests", 429, 5},
+		{"plain text", " upstream failure\n", "upstream failure", "real-debrid error 502: upstream failure", 502, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient("token", "", "", WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(tt.body))}, nil
+			})}))
+			_, err := client.User(t.Context())
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.StatusCode != tt.status || apiErr.Code != tt.code || apiErr.Message != tt.message || err.Error() != tt.wantError {
+				t.Fatalf("User() error = %#v, want %s", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestAuthErrorHandlerReceivesSentToken(t *testing.T) {
+	for _, handlerErr := range []error{nil, errors.New("authentication required")} {
+		t.Run(strconv.FormatBool(handlerErr != nil), func(t *testing.T) {
+			token := "sent-token"
+			var gotToken string
+			var gotAPIError *APIError
+			handlerCalls := 0
+			client := NewClient("static-token", "", "",
+				WithTokenSource(func(context.Context) (string, error) { return token, nil }),
+				WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if got := r.Header.Get("Authorization"); got != "Bearer sent-token" {
+						t.Errorf("Authorization = %q", got)
+					}
+					token = "newer-token"
+					return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(`{"error":"Bad token","error_code":8}`))}, nil
+				})}),
+				WithAuthErrorHandler(func(sent string, apiErr *APIError) error {
+					handlerCalls++
+					gotToken, gotAPIError = sent, apiErr
+					return handlerErr
+				}))
+			_, err := client.User(t.Context())
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr != gotAPIError || apiErr.StatusCode != 401 || apiErr.Code != 8 || gotToken != "sent-token" || handlerCalls != 1 {
+				t.Fatalf("error = %v, handler token = %q, calls = %d", err, gotToken, handlerCalls)
+			}
+			if handlerErr != nil && !errors.Is(err, handlerErr) {
+				t.Fatalf("handler error not preserved: %v", err)
+			}
+		})
+	}
+}
+
+func TestMutationNotAutomaticallyReplayed(t *testing.T) {
+	transportErr := errors.New("connection lost after sending mutation")
+	for _, tt := range []struct {
+		name             string
+		status           int
+		transportErr     error
+		wantHandlerCalls int
+	}{
+		{"rejection", 401, nil, 1},
+		{"rate limit", 429, nil, 0},
+		{"permission denied", 403, nil, 0},
+		{"transport failure", 0, transportErr, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mutationCalls, handlerCalls := 0, 0
+			client := NewClient("sent-token", "", "",
+				WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					mutationCalls++
+					if r.Method != http.MethodPost || r.URL.Path != "/rest/1.0/torrents/addMagnet" {
+						t.Errorf("unexpected mutation: %s %s", r.Method, r.URL.Path)
+					}
+					if tt.transportErr != nil {
+						return nil, tt.transportErr
+					}
+					return &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(`{"error":"rejected"}`))}, nil
+				})}),
+				WithAuthErrorHandler(func(string, *APIError) error { handlerCalls++; return nil }))
+			_, err := client.AddMagnet(t.Context(), "magnet:?xt=urn:btih:abc")
+			if err == nil || mutationCalls != 1 || handlerCalls != tt.wantHandlerCalls {
+				t.Fatalf("error = %v, mutation calls = %d, handler calls = %d", err, mutationCalls, handlerCalls)
+			}
+			if tt.transportErr != nil && !errors.Is(err, tt.transportErr) {
+				t.Fatalf("transport error not preserved: %v", err)
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func setTestVersion(t *testing.T, value string) {
 	t.Helper()

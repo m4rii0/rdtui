@@ -6,138 +6,40 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
-	"github.com/m4rii0/rdtui/internal/aria2"
 	"github.com/m4rii0/rdtui/internal/auth"
-	"github.com/m4rii0/rdtui/internal/config"
-	"github.com/m4rii0/rdtui/internal/directdl"
-	"github.com/m4rii0/rdtui/internal/download"
-	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
-type downloadManager interface {
-	SetBinaryPath(string)
-	StartDownload(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error)
-	DownloadStatus(context.Context, string) (models.ManagedDownload, error)
-	Shutdown(context.Context) error
-}
+// Authentication exposes display snapshots, never authoritative credentials.
+// The session manager remains the only token owner and request-time provider.
+type Authentication struct{ manager *auth.Manager }
 
-type Service struct {
-	store          *config.Store
-	config         config.Config
-	auth           *auth.Manager
-	client         *realdebrid.Client
-	session        *models.AuthSession
-	downloader     downloadManager
-	activeDownload *models.ManagedDownload
-}
+func (a *Authentication) Snapshot() models.AuthSession { return a.manager.Snapshot() }
 
-func New() (*Service, error) {
-	store, err := config.NewStore()
-	if err != nil {
+func (a *Authentication) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
+	if _, err := a.manager.Bootstrap(ctx); err != nil {
 		return nil, err
 	}
-	cfg, err := store.LoadConfig()
-	if err != nil {
+	return new(a.Snapshot()), nil
+}
+
+func (a *Authentication) AuthenticateWithToken(ctx context.Context, token string, persist bool) (*models.AuthSession, error) {
+	if _, err := a.manager.AuthenticateWithToken(ctx, token, persist); err != nil {
 		return nil, err
 	}
-	return &Service{
-		store:      store,
-		config:     cfg,
-		auth:       auth.NewManager(store, cfg),
-		downloader: newDownloadManager(cfg),
-	}, nil
+	return new(a.Snapshot()), nil
 }
 
-func newDownloadManager(cfg config.Config) downloadManager {
-	switch models.DownloadBackend(cfg.DownloadBackend) {
-	case models.DownloadBackendDirect:
-		return directdl.NewManager()
-	default:
-		return aria2.NewManager(cfg.Aria2BinaryPath)
-	}
+func (a *Authentication) StartDeviceFlow(ctx context.Context) (models.DeviceCode, error) {
+	return a.manager.StartDeviceFlow(ctx)
 }
 
-func (s *Service) Config() config.Config {
-	return s.config
-}
-
-func (s *Service) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
-	session, err := s.auth.Bootstrap(ctx)
-	if err != nil {
+func (a *Authentication) CompleteDeviceFlow(ctx context.Context, code models.DeviceCode) (*models.AuthSession, error) {
+	if _, err := a.manager.CompleteDeviceFlow(ctx, code); err != nil {
 		return nil, err
 	}
-	s.setSession(session)
-	return session, nil
-}
-
-func (s *Service) AuthenticateWithToken(ctx context.Context, token string, persist bool) (*models.AuthSession, error) {
-	session, err := s.auth.ValidateAndPersistToken(ctx, token, persist)
-	if err != nil {
-		return nil, err
-	}
-	if persist {
-		s.config.PrivateToken = token
-	}
-	s.setSession(session)
-	return session, nil
-}
-
-func (s *Service) StartDeviceFlow(ctx context.Context) (models.DeviceCode, error) {
-	return s.auth.StartDeviceFlow(ctx)
-}
-
-func (s *Service) CompleteDeviceFlow(ctx context.Context, code models.DeviceCode) (*models.AuthSession, error) {
-	session, err := s.auth.CompleteDeviceFlow(ctx, code)
-	if err != nil {
-		return nil, err
-	}
-	s.setSession(session)
-	return session, nil
-}
-
-func (s *Service) ListTorrents(ctx context.Context) ([]models.Torrent, error) {
-	if s.client == nil {
-		return nil, auth.ErrNoValidCredentials
-	}
-	return s.client.ListTorrents(ctx, 100)
-}
-
-func (s *Service) TorrentInfo(ctx context.Context, id string) (models.TorrentInfo, error) {
-	return s.client.TorrentInfo(ctx, id)
-}
-
-func (s *Service) AddMagnet(ctx context.Context, magnet string) (models.AddTorrentResult, error) {
-	return s.client.AddMagnet(ctx, magnet)
-}
-
-func (s *Service) AddTorrentURL(ctx context.Context, remoteURL string) (models.AddTorrentResult, error) {
-	return s.client.AddTorrentURL(ctx, remoteURL)
-}
-
-func (s *Service) ImportTorrentFiles(ctx context.Context, paths []string) []models.ImportResult {
-	results := make([]models.ImportResult, 0, len(paths))
-	for _, path := range paths {
-		res := models.ImportResult{Source: path}
-		added, err := s.client.AddTorrentPath(ctx, path)
-		if err != nil {
-			res.Err = err
-		} else {
-			res.TorrentID = added.ID
-		}
-		results = append(results, res)
-	}
-	return results
-}
-
-func (s *Service) SelectFiles(ctx context.Context, torrentID string, ids []int) error {
-	return s.client.SelectFiles(ctx, torrentID, ids)
-}
-
-func (s *Service) DeleteTorrent(ctx context.Context, torrentID string) error {
-	return s.client.DeleteTorrent(ctx, torrentID)
+	return new(a.Snapshot()), nil
 }
 
 func DefaultFileSelection(info models.TorrentInfo) []int {
@@ -179,92 +81,6 @@ func DownloadTargets(info models.TorrentInfo) []models.DownloadTarget {
 	return out
 }
 
-func (s *Service) ResolveDirectURL(ctx context.Context, target models.DownloadTarget) (models.UnrestrictedLink, error) {
-	return s.client.UnrestrictLink(ctx, target.Link)
-}
-
-func (s *Service) CopyURL(url string) (bool, error) {
-	return download.CopyURL(url)
-}
-
-func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
-	if current, ok, err := s.ManagedDownloadStatus(ctx); err == nil && ok && !current.IsTerminal() {
-		return models.ManagedDownloadStart{Download: current, Reused: true}, nil
-	}
-
-	request := models.ManagedDownloadRequest{
-		URL:      url,
-		Dir:      s.config.DefaultDownloadDir,
-		Filename: download.FilenameForURL(url, filename),
-	}
-	started, err := s.downloader.StartDownload(ctx, request)
-	if err != nil {
-		return models.ManagedDownloadStart{}, err
-	}
-	if started.URL == "" {
-		started.URL = url
-	}
-	if started.Filename == "" {
-		started.Filename = request.Filename
-	}
-	if started.Directory == "" {
-		started.Directory = request.Dir
-	}
-	s.activeDownload = &started
-	return models.ManagedDownloadStart{Download: started}, nil
-}
-
-func (s *Service) ManagedDownloadStatus(ctx context.Context) (models.ManagedDownload, bool, error) {
-	if s.activeDownload == nil {
-		return models.ManagedDownload{}, false, nil
-	}
-
-	status, err := s.downloader.DownloadStatus(ctx, s.activeDownload.GID)
-	if err != nil {
-		failed := *s.activeDownload
-		if !failed.IsTerminal() {
-			failed.Status = models.ManagedDownloadStatusError
-		}
-		failed.ErrorMessage = err.Error()
-		s.activeDownload = &failed
-		return failed, true, err
-	}
-
-	if status.URL == "" {
-		status.URL = s.activeDownload.URL
-	}
-	if status.Filename == "" {
-		status.Filename = s.activeDownload.Filename
-	}
-	if status.Directory == "" {
-		status.Directory = s.activeDownload.Directory
-	}
-	if status.FilePath == "" {
-		status.FilePath = s.activeDownload.FilePath
-	}
-	s.activeDownload = &status
-	return status, true, nil
-}
-
-func (s *Service) SavePrivateToken(token string) error {
-	s.config.PrivateToken = token
-	return s.store.SaveConfig(s.config)
-}
-
-func (s *Service) OpenFile(path string) error {
-	return download.OpenFile(path)
-}
-
-func (s *Service) RevealInDirectory(path string) error {
-	return download.RevealInDirectory(path)
-}
-
-func (s *Service) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	return s.downloader.Shutdown(ctx)
-}
-
 func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
 	seen := map[string]struct{}{}
 	for _, path := range paths {
@@ -282,9 +98,4 @@ func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
 	slices.Sort(valid)
 	slices.Sort(invalid)
 	return valid, invalid
-}
-
-func (s *Service) setSession(session *models.AuthSession) {
-	s.session = session
-	s.client = realdebrid.NewClient(session.Token, s.config.APIBaseURL, s.config.OAuthBaseURL)
 }

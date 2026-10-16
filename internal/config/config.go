@@ -12,6 +12,7 @@ import (
 
 const appName = "rdtui"
 
+// Config is the persisted config.json DTO, without overrides or defaults.
 type Config struct {
 	PrivateToken       string `json:"private_token,omitempty"`
 	DefaultDownloadDir string `json:"default_download_dir,omitempty"`
@@ -62,33 +63,15 @@ func (s *Store) AuthPath() string {
 }
 
 func (s *Store) LoadConfig() (Config, error) {
+	return s.LoadPreferences()
+}
+
+func (s *Store) LoadPreferences() (Config, error) {
 	var cfg Config
 	if err := s.loadJSON(s.config, &cfg); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return Config{}, err
 		}
-	}
-
-	if token := os.Getenv("RDTUI_PRIVATE_TOKEN"); token != "" {
-		cfg.PrivateToken = token
-	}
-	if apiBase := os.Getenv("RDTUI_API_BASE_URL"); apiBase != "" {
-		cfg.APIBaseURL = apiBase
-	}
-	if oauthBase := os.Getenv("RDTUI_OAUTH_BASE_URL"); oauthBase != "" {
-		cfg.OAuthBaseURL = oauthBase
-	}
-
-	if cfg.DefaultDownloadDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			cfg.DefaultDownloadDir = filepath.Join(home, "Downloads")
-		}
-	}
-	switch models.DownloadBackend(cfg.DownloadBackend) {
-	case models.DownloadBackendAria2, models.DownloadBackendDirect:
-	default:
-		cfg.DownloadBackend = string(models.DownloadBackendDirect)
 	}
 
 	return cfg, nil
@@ -141,7 +124,7 @@ func (s *Store) saveJSON(path string, value any) error {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := atomicWrite(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

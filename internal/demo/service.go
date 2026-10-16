@@ -9,22 +9,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 const defaultDownloadDuration = 10 * time.Second
+const demoDownloadDir = "/tmp/rdtui-demo"
 
-// Service implements app.AppService with fully offline mock data.
+// Service implements the feature consumers' contracts with fully offline data.
 // All state lives in memory; nothing touches the network or disk.
 type Service struct {
 	mu       sync.Mutex
 	torrents []torrentEntry
 	nextID   int
 
-	activeDownload   *models.ManagedDownload
-	downloadStart    time.Time
-	downloadDuration time.Duration
+	downloads *app.DownloadCoordinator
+	backend   *demoBackend
 }
 
 type torrentEntry struct {
@@ -32,8 +33,9 @@ type torrentEntry struct {
 	info    models.TorrentInfo
 }
 
-func NewService() *Service {
-	s := &Service{nextID: 100, downloadDuration: demoDownloadDuration()}
+func NewService(parent context.Context) *Service {
+	s := &Service{nextID: 100, backend: &demoBackend{downloadDuration: demoDownloadDuration()}}
+	s.downloads = app.NewDownloadCoordinator(parent, s.backend, demoDownloadDir)
 	s.torrents = s.seedData()
 	return s
 }
@@ -42,17 +44,13 @@ func NewService() *Service {
 // Auth / config — all no-ops for demo
 // ---------------------------------------------------------------------------
 
-func (s *Service) Config() config.Config {
-	return config.Config{
-		DefaultDownloadDir: "/tmp/rdtui-demo",
-		DownloadBackend:    "direct",
-	}
+func (s *Service) Bootstrap(_ context.Context) (*models.AuthSession, error) {
+	return new(s.Snapshot()), nil
 }
 
-func (s *Service) Bootstrap(_ context.Context) (*models.AuthSession, error) {
-	return &models.AuthSession{
+func (s *Service) Snapshot() models.AuthSession {
+	return models.AuthSession{
 		Method: models.AuthMethodToken,
-		Token:  "demo-token",
 		User: models.User{
 			ID:         1,
 			Username:   "linux_iso_collector",
@@ -60,7 +58,7 @@ func (s *Service) Bootstrap(_ context.Context) (*models.AuthSession, error) {
 			Premium:    1,
 			Expiration: time.Now().Add(30 * 24 * time.Hour),
 		},
-	}, nil
+	}
 }
 
 func (s *Service) AuthenticateWithToken(_ context.Context, _ string, _ bool) (*models.AuthSession, error) {
@@ -81,10 +79,9 @@ func (s *Service) CompleteDeviceFlow(_ context.Context, _ models.DeviceCode) (*m
 	return s.Bootstrap(context.Background())
 }
 
-func (s *Service) SavePrivateToken(_ string) error  { return nil }
 func (s *Service) OpenFile(_ string) error          { return nil }
 func (s *Service) RevealInDirectory(_ string) error { return nil }
-func (s *Service) Close() error                     { return nil }
+func (s *Service) Close(ctx context.Context) error  { return s.downloads.Close(ctx) }
 
 // ---------------------------------------------------------------------------
 // Torrent CRUD
@@ -146,26 +143,19 @@ func (s *Service) AddTorrentURL(_ context.Context, remoteURL string) (models.Add
 	return models.AddTorrentResult{ID: id}, nil
 }
 
-func (s *Service) ImportTorrentFiles(_ context.Context, paths []string) []models.ImportResult {
+func (s *Service) AddTorrentPath(_ context.Context, path string) (models.AddTorrentResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	results := make([]models.ImportResult, 0, len(paths))
-	for _, path := range paths {
-		id := fmt.Sprintf("demo-%d", s.nextID)
-		s.nextID++
-
-		name := path
-		if _, base, found := strings.CutLast(path, "/"); found {
-			name = base
-		}
-		name = strings.TrimSuffix(name, ".torrent")
-
-		entry := s.makeTorrent(id, name, "waiting_files_selection", 0, randSize())
-		s.torrents = append([]torrentEntry{entry}, s.torrents...)
-		results = append(results, models.ImportResult{Source: path, TorrentID: id})
+	id := fmt.Sprintf("demo-%d", s.nextID)
+	s.nextID++
+	name := path
+	if _, base, found := strings.CutLast(path, "/"); found {
+		name = base
 	}
-	return results
+	name = strings.TrimSuffix(name, ".torrent")
+	entry := s.makeTorrent(id, name, "waiting_files_selection", 0, randSize())
+	s.torrents = append([]torrentEntry{entry}, s.torrents...)
+	return models.AddTorrentResult{ID: id}, nil
 }
 
 func (s *Service) SelectFiles(_ context.Context, torrentID string, ids []int) error {
@@ -224,9 +214,7 @@ func (s *Service) CopyURL(_ string) (bool, error) {
 	return true, nil
 }
 
-func (s *Service) StartManagedDownload(_ context.Context, url, filename string) (models.ManagedDownloadStart, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *demoBackend) startDownloadLocked(url, filename string) (models.ManagedDownloadStart, error) {
 
 	if s.activeDownload != nil && !s.activeDownload.IsTerminal() {
 		return models.ManagedDownloadStart{Download: *s.activeDownload, Reused: true}, nil
@@ -245,12 +233,16 @@ func (s *Service) StartManagedDownload(_ context.Context, url, filename string) 
 	return models.ManagedDownloadStart{Download: dl}, nil
 }
 
-func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownload, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *demoBackend) downloadStatusLocked() (models.ManagedDownload, bool, error) {
 
 	if s.activeDownload == nil {
 		return models.ManagedDownload{}, false, nil
+	}
+	if s.transferContext != nil && s.transferContext.Err() != nil && !s.activeDownload.IsTerminal() {
+		s.activeDownload.Status = models.ManagedDownloadStatusRemoved
+	}
+	if s.activeDownload.IsTerminal() {
+		return *s.activeDownload, true, nil
 	}
 
 	progress := time.Since(s.downloadStart).Seconds() / s.downloadDuration.Seconds()
@@ -265,6 +257,79 @@ func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownlo
 	}
 
 	return *s.activeDownload, true, nil
+}
+
+func (s *Service) Start(ctx context.Context, url, filename string) (app.DownloadStart, error) {
+	return s.downloads.Start(ctx, url, filename)
+}
+
+func (s *Service) Status(ctx context.Context, ref app.DownloadRef) (app.DownloadSnapshot, error) {
+	return s.downloads.Status(ctx, ref)
+}
+
+func (s *Service) Current() (app.DownloadSnapshot, bool) { return s.downloads.Current() }
+
+func (s *Service) NewBulkQueue(runtime *app.Runtime) *app.BulkQueue {
+	return app.NewBulkQueue(app.QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: s.PrepareDownload})
+}
+
+func (s *Service) PrepareDownload(ctx context.Context, target models.DownloadTarget) (app.PreparedDownload, error) {
+	return app.PrepareDownload(ctx, target, demoDownloadDir, s.ResolveDirectURL, func(string) (int64, bool, error) { return 0, false, nil })
+}
+
+func (s *Service) NewBatches() *app.BatchService { return app.NewBatchService(s, s, nil) }
+
+func (s *Service) UnrestrictLink(ctx context.Context, link string) (models.UnrestrictedLink, error) {
+	return s.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
+}
+
+// The demo uses the same coordinator/queue as production; only backend I/O is
+// simulated. No presentation polling is needed to execute the queue.
+type demoBackend struct {
+	mu               sync.Mutex
+	activeDownload   *models.ManagedDownload
+	transferContext  context.Context
+	downloadClosed   bool
+	downloadStart    time.Time
+	downloadDuration time.Duration
+}
+
+func (s *demoBackend) StartDownload(ctx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return models.ManagedDownload{}, err
+	}
+	if s.downloadClosed {
+		return models.ManagedDownload{}, download.ErrClosed
+	}
+	s.transferContext = ctx
+	started, err := s.startDownloadLocked(req.URL, req.Filename)
+	return started.Download, err
+}
+func (s *demoBackend) DownloadStatus(ctx context.Context, gid string) (models.ManagedDownload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return models.ManagedDownload{}, err
+	}
+	if s.downloadClosed {
+		return models.ManagedDownload{}, download.ErrClosed
+	}
+	if s.activeDownload == nil || s.activeDownload.GID != gid {
+		return models.ManagedDownload{}, app.ErrStaleDownload
+	}
+	d, _, err := s.downloadStatusLocked()
+	return d, err
+}
+func (s *demoBackend) Shutdown(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.downloadClosed = true
+	if s.activeDownload != nil && !s.activeDownload.IsTerminal() {
+		s.activeDownload.Status = models.ManagedDownloadStatusRemoved
+	}
+	return nil
 }
 
 func demoDownloadDuration() time.Duration {

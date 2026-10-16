@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -65,7 +66,7 @@ func TestSortTorrentsPreservesTieBreakers(t *testing.T) {
 }
 
 func TestApplyFilterCopiesUnfilteredTorrents(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.sortColumn = colName
 	m.sortAscending = true
 	m.torrents = []models.Torrent{{ID: "b", Filename: "b"}, {ID: "a", Filename: "a"}}
@@ -85,7 +86,7 @@ func TestApplyFilterCopiesUnfilteredTorrents(t *testing.T) {
 }
 
 func TestSortByColumnPreservesSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -110,7 +111,7 @@ func TestSortByColumnPreservesSelection(t *testing.T) {
 }
 
 func TestSortTogglesDirection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -138,7 +139,7 @@ func TestSortTogglesDirection(t *testing.T) {
 }
 
 func TestSortDifferentColumnResetsDirection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: true,
 		torrents: []models.Torrent{
@@ -159,7 +160,7 @@ func TestSortDifferentColumnResetsDirection(t *testing.T) {
 }
 
 func TestDefaultSortState(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	if m.sortColumn != colAdded {
 		t.Fatalf("default sortColumn = %d, want colAdded", m.sortColumn)
 	}
@@ -169,7 +170,7 @@ func TestDefaultSortState(t *testing.T) {
 }
 
 func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -199,7 +200,7 @@ func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
 }
 
 func TestAddTorrentFocusesNewTorrentAfterRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeURLInput,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -235,7 +236,7 @@ func TestAddTorrentFocusesNewTorrentAfterRefresh(t *testing.T) {
 }
 
 func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeFileBrowser,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -245,13 +246,16 @@ func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	updated, cmd := m.Update(importMsg{results: []models.ImportResult{{Source: "movie.torrent", TorrentID: "new"}}})
+	updated, cmd := m.Update(importMsg{result: app.BatchResult{Items: []app.ItemOutcome{{Source: "movie.torrent", TorrentCreatedID: "new", Kind: app.OutcomeSuccess}, {Source: "bad.torrent", Kind: app.OutcomeFailed, Err: errors.New("denied")}}}})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected refresh command after importing torrent")
 	}
 	if m.pendingFocusID != "new" {
 		t.Fatalf("pendingFocusID = %q, want new", m.pendingFocusID)
+	}
+	if !strings.Contains(m.status, "1 failed") || !strings.Contains(m.errText, "bad.torrent") {
+		t.Fatalf("status=%q err=%q", m.status, m.errText)
 	}
 
 	updated, _ = m.Update(torrentsMsg{torrents: []models.Torrent{
@@ -268,7 +272,7 @@ func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
 }
 
 func TestPendingFocusWaitsUntilTorrentAppears(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn:    colAdded,
 		sortAscending: false,
 		torrents: []models.Torrent{
@@ -309,7 +313,7 @@ func TestStatusRankOrdering(t *testing.T) {
 }
 
 func TestCanSelectFilesIncludesMagnetConversion(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:        modeMain,
 		torrents:    []models.Torrent{{ID: "a", Status: "magnet_conversion"}},
 		selectedIdx: 0,
@@ -343,7 +347,7 @@ func TestCompareByColumn(t *testing.T) {
 }
 
 func TestEnterOpensDetailView(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -364,7 +368,7 @@ func TestEnterOpensDetailView(t *testing.T) {
 }
 
 func TestEnterWithCachedDetail(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -386,7 +390,7 @@ func TestEnterWithCachedDetail(t *testing.T) {
 }
 
 func TestEscapeReturnsToList(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDetail,
 		returnMode: modeMain,
 		sortColumn: colAdded,
@@ -404,7 +408,7 @@ func TestEscapeReturnsToList(t *testing.T) {
 }
 
 func TestShiftLetterSortShortcuts(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -436,7 +440,7 @@ func TestShiftLetterSortShortcuts(t *testing.T) {
 }
 
 func TestDeleteFromMainView(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		returnMode:    modeMain,
 		sortColumn:    colAdded,
@@ -459,7 +463,7 @@ func TestDeleteFromMainView(t *testing.T) {
 }
 
 func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		returnMode: modeMain,
 		torrents: []models.Torrent{
@@ -486,7 +490,7 @@ func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
 }
 
 func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDetail,
 		returnMode: modeDetail,
 		detail: &models.TorrentInfo{
@@ -508,22 +512,6 @@ func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
 	}
 }
 
-func TestManagedDownloadMsgEntersDownloadMode(t *testing.T) {
-	m := Model{returnMode: modeDetail}
-
-	updated, cmd := m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}})
-	m = updated.(Model)
-	if m.mode != modeDownload {
-		t.Fatalf("mode = %q, want modeDownload", m.mode)
-	}
-	if m.download == nil || m.download.Filename != "movie.mkv" {
-		t.Fatalf("download = %+v", m.download)
-	}
-	if cmd == nil {
-		t.Fatal("expected polling command after entering download mode")
-	}
-}
-
 func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "movie.mkv")
@@ -531,9 +519,15 @@ func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+	m := Model{runtime: newTestRuntime(t), mode: modeChooseTarget, returnMode: modeDetail}
 
-	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
+	prepared, err := app.PrepareDownload(t.Context(), models.DownloadTarget{}, dir, func(context.Context, models.DownloadTarget) (models.UnrestrictedLink, error) {
+		return models.UnrestrictedLink{Download: "https://example.com/file", Filename: "movie.mkv", Filesize: 100}, nil
+	}, testFileSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, cmd := m.Update(resolvedDownloadMsg{prepared: prepared})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatal("expected no start command before overwrite confirmation")
@@ -554,9 +548,15 @@ func TestResolvedDownloadPromptsWhenFileExists(t *testing.T) {
 
 func TestResolvedDownloadStartsImmediatelyWhenFileMissing(t *testing.T) {
 	dir := t.TempDir()
-	m := Model{mode: modeChooseTarget, returnMode: modeDetail, downloadDir: dir}
+	m := Model{runtime: newTestRuntime(t), mode: modeChooseTarget, returnMode: modeDetail}
 
-	updated, cmd := m.Update(resolvedDownloadMsg{url: "https://example.com/file", filename: "movie.mkv", filesize: 100})
+	prepared, err := app.PrepareDownload(t.Context(), models.DownloadTarget{}, dir, func(context.Context, models.DownloadTarget) (models.UnrestrictedLink, error) {
+		return models.UnrestrictedLink{Download: "https://example.com/file", Filename: "movie.mkv", Filesize: 100}, nil
+	}, testFileSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, cmd := m.Update(resolvedDownloadMsg{prepared: prepared})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected start command when file missing")
@@ -570,7 +570,7 @@ func TestResolvedDownloadStartsImmediatelyWhenFileMissing(t *testing.T) {
 }
 
 func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeOverwrite,
 		returnMode: modeDetail,
 		pendingDownload: &pendingDownloadState{
@@ -588,21 +588,22 @@ func TestOverwriteCancelReturnsToPreviousMode(t *testing.T) {
 	}
 }
 
-func TestManagedDownloadStatusMsgMarksCompletion(t *testing.T) {
-	m := Model{mode: modeDownload, download: &models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusActive}}
-
-	updated, _ := m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-1", Filename: "movie.mkv", Status: models.ManagedDownloadStatusComplete}})
-	m = updated.(Model)
-	if m.download == nil || !m.download.IsComplete() {
-		t.Fatalf("download = %+v", m.download)
-	}
-	if m.status != "Download complete" {
-		t.Fatalf("status = %q", m.status)
+func TestTerminalDownloadRefreshDoesNotSetLoading(t *testing.T) {
+	for _, status := range []models.ManagedDownloadStatus{models.ManagedDownloadStatusComplete, models.ManagedDownloadStatusError} {
+		t.Run(string(status), func(t *testing.T) {
+			m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
+			m.mode = modeDownload
+			m.download = &models.ManagedDownload{GID: "done", Status: status}
+			updated, cmd := m.handleShortcutAction(actionRefresh)
+			if updated.(Model).loading || cmd != nil {
+				t.Fatal("terminal refresh left loading without work")
+			}
+		})
 	}
 }
 
 func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
-	m := Model{mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
+	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 
 	updated, _ := m.Update(downloadPathMsg{action: "reveal"})
 	m = updated.(Model)
@@ -612,7 +613,7 @@ func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
 }
 
 func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:              modeDownload,
 		returnMode:        modeDetail,
 		download:          &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete},
@@ -633,7 +634,7 @@ func TestCompletedDownloadCanDeleteTorrent(t *testing.T) {
 }
 
 func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDelete,
 		returnMode: modeDetail,
 		deleteIDs:  []string{"a"},
@@ -647,7 +648,7 @@ func TestDeleteCancelReturnsToReturnMode(t *testing.T) {
 }
 
 func TestDeleteSuccessReturnsToMain(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeDelete,
 		returnMode: modeDetail,
 		deleteIDs:  []string{"a"},
@@ -661,7 +662,7 @@ func TestDeleteSuccessReturnsToMain(t *testing.T) {
 }
 
 func TestModalReturnsToReturnMode(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeSelectFiles,
 		returnMode: modeDetail,
 		selector:   selectFilesState{Files: []models.TorrentFile{}, Selected: map[int]bool{}},
@@ -675,7 +676,7 @@ func TestModalReturnsToReturnMode(t *testing.T) {
 }
 
 func TestBatchModeToggle(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -703,7 +704,7 @@ func TestBatchModeToggle(t *testing.T) {
 }
 
 func TestBatchSpaceTogglesMark(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -729,7 +730,7 @@ func TestBatchSpaceTogglesMark(t *testing.T) {
 }
 
 func TestBatchDeleteEntersConfirmation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		batchMode:  true,
 		sortColumn: colAdded,
@@ -752,7 +753,7 @@ func TestBatchDeleteEntersConfirmation(t *testing.T) {
 }
 
 func TestBatchEscapeClearsSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -769,7 +770,7 @@ func TestBatchEscapeClearsSelection(t *testing.T) {
 }
 
 func TestSelectAllTorrents(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeMain,
 		batchMode:  true,
 		sortColumn: colAdded,
@@ -789,7 +790,7 @@ func TestSelectAllTorrents(t *testing.T) {
 }
 
 func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		sortColumn: colAdded,
 		torrents: []models.Torrent{
 			{ID: "c", Added: time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC)},
@@ -808,7 +809,7 @@ func TestBatchSelectedIDsMaintainsOrder(t *testing.T) {
 }
 
 func TestMainDownloadFetchesDetailWhenSelectionIsReady(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		returnMode:    modeMain,
 		sortColumn:    colAdded,
@@ -836,7 +837,7 @@ func TestMainDownloadFetchesDetailWhenSelectionIsReady(t *testing.T) {
 }
 
 func TestHelpOverlayTogglesWithoutChangingContext(t *testing.T) {
-	m := Model{mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
+	m := Model{runtime: newTestRuntime(t), mode: modeMain, torrents: []models.Torrent{{ID: "a", Status: "downloaded"}}, selectedIdx: 0}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	m = updated.(Model)
@@ -860,7 +861,7 @@ func TestHelpOverlayTogglesWithoutChangingContext(t *testing.T) {
 func TestBrowserEditingQuestionMarkStaysInInput(t *testing.T) {
 	b := newFileBrowser(".")
 	b.startEditing()
-	m := Model{mode: modeFileBrowser, browser: b}
+	m := Model{runtime: newTestRuntime(t), mode: modeFileBrowser, browser: b}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	m = updated.(Model)
@@ -873,7 +874,7 @@ func TestBrowserEditingQuestionMarkStaysInInput(t *testing.T) {
 }
 
 func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		sortColumn:    colAdded,
 		sortAscending: false,
@@ -900,7 +901,7 @@ func TestDimmedMainDownloadShortcutDoesNotLaunch(t *testing.T) {
 }
 
 func TestBulkDownloadEligibilityRequiresTwoDownloadedSelections(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -929,7 +930,7 @@ func TestBulkDownloadEligibilityRequiresTwoDownloadedSelections(t *testing.T) {
 }
 
 func TestBulkDownloadStartsInVisibleOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -956,7 +957,7 @@ func TestBulkDownloadStartsInVisibleOrder(t *testing.T) {
 }
 
 func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode: modeBulkOrder,
 		bulk: newBulkDownloadState([]models.Torrent{
 			{ID: "a", Filename: "single"},
@@ -995,7 +996,9 @@ func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
 }
 
 func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
-	m := Model{
+	queue := &queueServiceSpy{}
+	m := Model{runtime: newTestRuntime(t),
+		bulkQueue:     queue,
 		mode:          modeBulkConfirm,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true, "b": true},
@@ -1012,54 +1015,92 @@ func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd == nil {
-		t.Fatal("expected resolve command for first queued file")
+		t.Fatal("expected queue admission command")
 	}
-	if m.mode != modeBulkDownload || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive {
+	if m.mode != modeBulkDownload || !m.bulk.Starting || m.bulk.Items[0].Status != bulkFilePending {
 		t.Fatalf("bulk state = mode %q current %d status %q", m.mode, m.bulk.Current, m.bulk.Items[0].Status)
 	}
 	if m.batchMode || len(m.batchSelected) != 0 {
 		t.Fatal("expected batch selection cleared once bulk queue starts")
 	}
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if m.bulk.QueueID != 7 || queue.startCalls != 1 || len(queue.plan.Items) != 2 || queue.plan.Items[0].TorrentID != "a" || queue.plan.Items[1].TorrentID != "b" {
+		t.Fatal("confirmation did not submit the ordered plan once")
+	}
 }
 
 func TestBulkQueueContinuesAfterFailure(t *testing.T) {
-	m := Model{
-		mode:       modeBulkDownload,
-		returnMode: modeBulkDownload,
-		bulk:       newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+	m, s := observedQueue(t)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeFailed, Err: errors.New("resolve failed")}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd := updateQueue(m, s.snapshot)
+	if cmd == nil || m.bulk.Items[0].Status != bulkFileFailed || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatal("failed item was not rendered with the next active item")
 	}
-	m.bulk.Items = []bulkQueueItem{
-		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
-		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeSuccess}
+	m, cmd = updateQueue(m, s.snapshot)
+	if cmd != nil || !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess || s.startCalls != 0 {
+		t.Fatal("completion started work instead of rendering the outcome")
 	}
-	m.bulk.Current = 0
+}
 
-	updated, cmd := m.Update(resolvedDownloadMsg{err: errors.New("resolve failed")})
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected command to start next queued file after failure")
+func TestBulkStatusTransportFailureWaitsForSameDownload(t *testing.T) {
+	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
+	m, s := observedQueue(t)
+	m.mode = modeMain
+	s.snapshot.Download = &app.DownloadSnapshot{Ref: app.DownloadRef{Generation: 1, GID: "gid-1"}, Download: active}
+	m, _ = updateQueue(m, s.snapshot)
+	// Observation errors retain the last valid application snapshot.
+	for range 2 {
+		updated, cmd := m.Update(bulkSnapshotMsg{queueID: 7, request: requestID{m.queuePoll.Generation}, err: errors.New("temporary status transport failure")})
+		m = updated.(Model)
+		if cmd == nil || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive || m.bulk.Items[1].Status != bulkFilePending || *m.download != active {
+			t.Fatalf("status error advanced/misattributed queue: current=%d items=%+v download=%+v", m.bulk.Current, m.bulk.Items, m.download)
+		}
+		updated, cmd = m.Update(bulkTickMsg{7, requestID{m.queuePoll.Generation}})
+		m = updated.(Model)
+		if cmd == nil || m.mode != modeMain {
+			t.Fatal("background queue stopped polling after recoverable status error")
+		}
 	}
-	if m.bulk.Items[0].Status != bulkFileFailed || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
-		t.Fatalf("bulk items after failure = %+v current=%d", m.bulk.Items, m.bulk.Current)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeSuccess}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd := updateQueue(m, s.snapshot)
+	if cmd == nil || m.bulk.Current != 1 || m.bulk.Items[0].Status != bulkFileSuccess || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatalf("confirmed completion did not advance the correct item: current=%d items=%+v", m.bulk.Current, m.bulk.Items)
 	}
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeFailed, Err: errors.New("backend terminated")}
+	m, cmd = updateQueue(m, s.snapshot)
+	if cmd != nil || !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileFailed {
+		t.Fatalf("definitive terminal error did not finish the next item: %+v", m.bulk.Items)
+	}
+}
 
-	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
+func TestSingleStatusTransportFailureKeepsPolling(t *testing.T) {
+	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
+	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: new(active), status: "Downloading"}
+	updated, cmd := m.Update(currentDownloadResult(m, active, errors.New("temporary status transport failure")))
 	m = updated.(Model)
+	if cmd == nil || m.status != "Downloading" || *m.download != active {
+		t.Fatalf("transient query failure became download failure: status=%q download=%+v", m.status, m.download)
+	}
+	_, cmd = m.Update(downloadTickMsg{downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}})
 	if cmd == nil {
-		t.Fatal("expected status polling after managed download starts")
-	}
-	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}})
-	m = updated.(Model)
-	if cmd != nil {
-		t.Fatal("expected no command after queue finishes")
-	}
-	if !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess {
-		t.Fatalf("bulk state after completion = %+v", m.bulk.Items)
+		t.Fatal("single transfer stopped polling after recoverable status error")
 	}
 }
 
 func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode: modeBulkDownload,
 		bulk: newBulkDownloadState([]models.Torrent{
 			{ID: "a", Filename: "complete"},
@@ -1071,6 +1112,7 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 		{TorrentID: "b", TorrentName: "partial", Status: bulkFileSuccess},
 		{TorrentID: "b", TorrentName: "partial", Status: bulkFileFailed, Error: "network"},
 	}
+	m.bulk.Snapshot.Finished = true
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(Model)
@@ -1092,18 +1134,7 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 }
 
 func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
-	m := Model{
-		mode:        modeBulkDownload,
-		downloadDir: t.TempDir(),
-		download:    &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
-		bulk:        newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
-	}
-	m.bulk.Items = []bulkQueueItem{
-		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
-		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
-	}
-	m.bulk.Current = 0
-
+	m, s := observedQueue(t)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if cmd != nil {
@@ -1116,7 +1147,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("status = %q, want background status", m.status)
 	}
 
-	updated, cmd = m.Update(downloadTickMsg(time.Now()))
+	updated, cmd = m.Update(bulkTickMsg{7, requestID{m.queuePoll.Generation}})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected background bulk download polling after leaving view")
@@ -1125,10 +1156,13 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("mode = %q, want to stay in modeMain while polling", m.mode)
 	}
 
-	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusComplete}})
-	m = updated.(Model)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeSuccess}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd = updateQueue(m, s.snapshot)
 	if cmd == nil {
-		t.Fatal("expected command to start next queued file in background")
+		t.Fatal("expected background observation to continue")
 	}
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want background queue to preserve modeMain", m.mode)
@@ -1137,26 +1171,10 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("bulk state = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 
-	updated, cmd = m.Update(resolvedDownloadMsg{url: "https://example.com/b", filename: "b.mkv", filesize: 100})
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected command to start resolved background bulk item")
-	}
-	if m.mode != modeMain {
-		t.Fatalf("mode = %q, want resolved background item to preserve modeMain", m.mode)
-	}
-
-	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected polling command after background managed download starts")
-	}
-	if m.mode != modeMain {
-		t.Fatalf("mode = %q, want background managed download start to preserve modeMain", m.mode)
-	}
-
-	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}})
-	m = updated.(Model)
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeSuccess}
+	m, cmd = updateQueue(m, s.snapshot)
 	if cmd != nil {
 		t.Fatal("expected no command after background queue finishes")
 	}
@@ -1169,7 +1187,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 }
 
 func TestBulkSelectFilesStartsWithEligibleAndSkippedSelections(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		sortColumn:    colAdded,
@@ -1202,7 +1220,7 @@ func TestBulkSelectFilesStartsWithEligibleAndSkippedSelections(t *testing.T) {
 }
 
 func TestBulkSelectFilesRejectsSelectionWithNoEligibleTorrents(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		torrents:      []models.Torrent{{ID: "a", Filename: "ready", Status: "downloaded"}},
@@ -1220,7 +1238,7 @@ func TestBulkSelectFilesRejectsSelectionWithNoEligibleTorrents(t *testing.T) {
 }
 
 func TestBulkSelectFilesUsesFilteredVisibleOrder(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeMain,
 		batchMode:     true,
 		filterApplied: true,
@@ -1244,7 +1262,7 @@ func TestBulkSelectFilesUsesFilteredVisibleOrder(t *testing.T) {
 }
 
 func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:       modeBulkSelectFiles,
 		batchMode:  true,
 		bulkSelect: newBulkFileSelectionState([]models.Torrent{{ID: "a", Filename: "alpha"}}, nil),
@@ -1277,7 +1295,7 @@ func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) 
 }
 
 func TestBulkSelectFilesCancelKeepsBatchSelection(t *testing.T) {
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeBulkSelectFiles,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true},
@@ -1299,9 +1317,9 @@ func TestBulkSelectFilesSubmitsSequentiallyAndReportsPartialFailure(t *testing.T
 		selectErr: map[string]error{"b": errors.New("denied")},
 		selected:  map[string][]int{},
 	}
-	m := Model{
+	m := Model{runtime: newTestRuntime(t),
 		mode:          modeBulkSelectFiles,
-		service:       service,
+		batches:       testBatches(service),
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true, "b": true, "c": true},
 		bulkSelect: &bulkFileSelectionState{
@@ -1338,29 +1356,115 @@ func TestBulkSelectFilesSubmitsSequentiallyAndReportsPartialFailure(t *testing.T
 	}
 }
 
+// Counting torrents as URLs or following list order rather than confirmed IDs
+// must not misreport a partially resolved torrent.
+func TestBatchCopyRendersExactUnits(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(fmt.Sprint(available), func(t *testing.T) {
+			service := &batchCopyTestService{available: available}
+			runtime := newTestRuntime(t)
+			ids := []string{"b", "a"}
+			torrents := []models.Torrent{{ID: "a", Status: "downloaded", Links: []string{"bad"}}, {ID: "b", Status: "downloaded", Links: []string{"one", "two", "bad"}}}
+			cmd := batchOpCmd(t.Context(), runtime, testBatches(service), batchOpCopy, ids, torrents)
+			ids[0] = "changed"
+			torrents[1].Links[0] = "changed"
+			result := cmd().(batchResultMsg)
+			if len(result.items) != 4 || result.items[2].TargetIndex != 2 || result.items[3].TargetIndex != 0 {
+				t.Fatal(result.items)
+			}
+			if !slices.Equal(service.links, []string{"one", "two", "bad", "bad"}) || service.copied != "url\nurl" {
+				t.Fatalf("links=%v copied=%q", service.links, service.copied)
+			}
+			m := Model{mode: modeMain}
+			updated, _ := m.Update(result)
+			m = updated.(Model)
+			want := "Copied 2 URL(s)"
+			if !available {
+				want = "Resolved 2 URL(s), copied 0"
+			}
+			if !strings.Contains(m.flash.message, want) || !strings.Contains(m.flash.message, "1 partial torrent(s)") || !strings.Contains(m.flash.message, "1 failed torrent(s)") {
+				t.Fatalf("flash=%q err=%q", m.flash.message, m.errText)
+			}
+			if !available && !strings.Contains(m.errText, "clipboard not available") {
+				t.Fatal(m.errText)
+			}
+		})
+	}
+}
+
+type batchCopyTestService struct {
+	testBatchAPI
+	DesktopService
+	available bool
+	links     []string
+	copied    string
+}
+
+func (s *batchCopyTestService) ResolveDirectURL(_ context.Context, target models.DownloadTarget) (models.UnrestrictedLink, error) {
+	s.links = append(s.links, target.Link)
+	if target.Link == "bad" {
+		return models.UnrestrictedLink{}, errors.New("bad link")
+	}
+	return models.UnrestrictedLink{Download: "url"}, nil
+}
+func (s *batchCopyTestService) CopyURL(url string) (bool, error) {
+	s.copied = url
+	return s.available, nil
+}
+
+func TestImportCommandPreservesPartialResultsAndInput(t *testing.T) {
+	service := &batchImportTestService{}
+	runtime := newTestRuntime(t)
+	paths := []string{"bad.torrent", "good.torrent", "good.torrent"}
+	cmd := importCmd(t.Context(), runtime, testBatches(service), paths)
+	paths[1] = "changed"
+	msg := cmd().(importMsg)
+	if !slices.Equal(service.paths, []string{"bad.torrent", "good.torrent", "good.torrent"}) || len(msg.result.Items) != 3 || msg.result.Items[0].Kind != app.OutcomeFailed || msg.result.Items[2].TorrentCreatedID != "new" {
+		t.Fatalf("paths=%v result=%+v", service.paths, msg.result)
+	}
+	m := Model{runtime: runtime}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+	if m.pendingFocusID != "new" || !strings.Contains(m.status, "Imported 2 torrent file(s), 1 failed") || !strings.Contains(m.errText, "bad.torrent") {
+		t.Fatalf("focus=%q status=%q err=%q", m.pendingFocusID, m.status, m.errText)
+	}
+}
+
+type batchImportTestService struct {
+	testBatchAPI
+	DesktopService
+	paths []string
+}
+
+func (s *batchImportTestService) ImportTorrentFiles(_ context.Context, paths []string) []models.ImportResult {
+	s.paths = append(s.paths, paths...)
+	var results []models.ImportResult
+	for _, path := range paths {
+		result := models.ImportResult{Source: path, TorrentID: "new"}
+		if path == "bad.torrent" {
+			result.Err = errors.New("denied")
+			result.TorrentID = ""
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+func TestBatchCancellationRendersCompletedUnits(t *testing.T) {
+	batch := app.BatchResult{Items: []app.ItemOutcome{{TorrentID: "a", Kind: app.OutcomeSuccess}, {TorrentID: "b", Kind: app.OutcomeCanceled, Err: context.Canceled, RemoteOutcomeUnknown: true}, {TorrentID: "c", Kind: app.OutcomeCanceled, Err: context.Canceled}}, Err: context.Canceled}
+	m := Model{runtime: newTestRuntime(t)}
+	updated, _ := m.Update(batchMessage(batchOpDelete, batch))
+	m = updated.(Model)
+	if !strings.Contains(m.flash.message, "Deleted 1/3 torrent(s), 2 canceled") || !strings.Contains(m.errText, "Remote outcome unknown") {
+		t.Fatalf("flash=%q err=%q", m.flash.message, m.errText)
+	}
+}
+
 type bulkFileSelectionTestService struct {
 	details   map[string]models.TorrentInfo
 	detailErr map[string]error
 	selectErr map[string]error
 	selected  map[string][]int
-}
-
-func (s *bulkFileSelectionTestService) Config() config.Config { return config.Config{} }
-
-func (s *bulkFileSelectionTestService) Bootstrap(context.Context) (*models.AuthSession, error) {
-	return nil, nil
-}
-
-func (s *bulkFileSelectionTestService) AuthenticateWithToken(context.Context, string, bool) (*models.AuthSession, error) {
-	return nil, nil
-}
-
-func (s *bulkFileSelectionTestService) StartDeviceFlow(context.Context) (models.DeviceCode, error) {
-	return models.DeviceCode{}, nil
-}
-
-func (s *bulkFileSelectionTestService) CompleteDeviceFlow(context.Context, models.DeviceCode) (*models.AuthSession, error) {
-	return nil, nil
 }
 
 func (s *bulkFileSelectionTestService) ListTorrents(context.Context) ([]models.Torrent, error) {
@@ -1402,18 +1506,6 @@ func (s *bulkFileSelectionTestService) ResolveDirectURL(context.Context, models.
 
 func (s *bulkFileSelectionTestService) CopyURL(string) (bool, error) { return false, nil }
 
-func (s *bulkFileSelectionTestService) StartManagedDownload(context.Context, string, string) (models.ManagedDownloadStart, error) {
-	return models.ManagedDownloadStart{}, nil
-}
-
-func (s *bulkFileSelectionTestService) ManagedDownloadStatus(context.Context) (models.ManagedDownload, bool, error) {
-	return models.ManagedDownload{}, false, nil
-}
-
-func (s *bulkFileSelectionTestService) SavePrivateToken(string) error { return nil }
-
 func (s *bulkFileSelectionTestService) OpenFile(string) error { return nil }
 
 func (s *bulkFileSelectionTestService) RevealInDirectory(string) error { return nil }
-
-func (s *bulkFileSelectionTestService) Close() error { return nil }

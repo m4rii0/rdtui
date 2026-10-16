@@ -19,7 +19,7 @@ help:
 	  '  make run        Run the TUI directly with go run' \
 	  '  make run-debug  Run the TUI with debug logging (RDTUI_DEBUG=1)' \
 	  '  make test       Run the Go test suite' \
-	  '  make test-race  Run tests with the race detector' \
+	  '  make test-race  Run the full Go test suite with the race detector' \
 	  '  make lint       Run go vet and golangci-lint if available' \
 	  '  make vet        Run go vet' \
 	  '  make fmt        Format Go code' \
@@ -96,4 +96,5 @@ clean:
 
 check: fmt lint test build
 
+# CI requires verify followed by test-race on Linux; both retain the full suite.
 verify: fmt-check tidy-check lint test build

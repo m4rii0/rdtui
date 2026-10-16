@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -35,7 +37,16 @@ func TestBootstrapPrefersConfiguredPrivateToken(t *testing.T) {
 		t.Fatalf("SaveDeviceCredentials() error = %v", err)
 	}
 
-	manager := NewManager(store, cfg)
+	prefs, err := config.NewRepository(store, config.Overrides{}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := sessionDependencies(t, store, realdebrid.NewClient("", server.URL, server.URL))
+	deps.Preferences = prefs
+	deps.Validate = func(ctx context.Context, token string) (models.User, error) {
+		return realdebrid.NewClient(token, server.URL, server.URL).User(ctx)
+	}
+	manager := NewManager(deps)
 	session, err := manager.Bootstrap(t.Context())
 	if err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)

@@ -4,11 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Bound each test package so a regression fails instead of stalling CI.
+env:
+  GOFLAGS: -timeout=2m
 
 jobs:
   verify:
@@ -25,5 +28,13 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          golangci-lint version
+
       - name: Verify
         run: make verify
+
+      - name: Race tests
+        run: make test-race

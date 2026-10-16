@@ -175,9 +175,23 @@ RDTUI_PRIVATE_TOKEN=... go run ./cmd/rdtui
 ```
 
 Credential precedence is:
-1. configured or environment-provided private token
-2. stored device-auth credentials
-3. interactive auth prompt
+1. nonempty `RDTUI_PRIVATE_TOKEN`
+2. private token saved in `config.json`
+3. stored device-auth credentials
+4. interactive auth prompt
+
+Invalid explicit private tokens report an error rather than falling back to device
+auth. Device tokens refresh automatically before authenticated requests when
+missing or within one minute of expiry. Concurrent requests share a refresh;
+private tokens do not use OAuth refresh.
+
+New device credentials (including rotated refresh tokens) must be saved before
+API use. If saving fails, the app reports a persistence error and retains the new
+credentials in memory to retry saving without repeating OAuth. They are **not
+usable until saved**. Fix the storage problem and retry before quitting: pending
+credentials are lost on exit and reauthentication may be needed. Missing stored
+credentials prompt authentication; corrupt or unreadable credentials report the
+underlying error instead.
 
 ## Configuration
 
@@ -209,6 +223,12 @@ Example:
 Behavior summary:
 - `download_backend = "direct"`: `rdtui` downloads the resolved URL with its built-in HTTP downloader and does not require `aria2c`.
 - `download_backend = "aria2"`: `rdtui` starts its own loopback-only `aria2c` RPC session and monitors that download in the TUI.
+
+Environment overrides (`RDTUI_PRIVATE_TOKEN`, `RDTUI_API_BASE_URL`, and
+`RDTUI_OAUTH_BASE_URL`) affect runtime configuration, not unrelated preference
+saves. An explicitly entered token is saved as entered. Configuration and device
+credentials use atomic file replacement; a failed save preserves the previous
+file. Restart after changing backend or download-directory settings.
 
 ### `auth.json`
 
@@ -269,11 +289,26 @@ In bulk operations mode, press `s` after marking torrents to select Real-Debrid 
 
 During an active bulk download, the queue view highlights the current item and keeps it visible as the queue advances. Pressing `esc` returns to the torrent list while the queue continues in the background.
 
-After a bulk download finishes, press `x` from the bulk summary to clean up source torrents. Fully successful torrents are pre-selected for deletion, while failed or partial torrents are left unselected by default but can be toggled manually. Selecting incomplete torrents triggers a warning before confirmation.
+After a bulk download finishes, press `x` from the bulk summary to clean up source torrents. Only fully successful torrents are pre-selected for deletion; partial, failed, skipped, and canceled torrents remain unselected unless toggled manually. Selecting incomplete torrents triggers a warning before confirmation.
 
 When `download_backend` is `aria2`, `rdtui` starts its own loopback-only `aria2c` RPC session for the download.
 
-When `download_backend` is `direct`, `rdtui` falls back to a built-in HTTP download and does not require `aria2c`.
+The default `direct` backend uses built-in HTTP downloads and does not require `aria2c`.
+
+Leaving a download screen does not cancel an admitted transfer. A bulk queue
+reserves download admission even while resolving URLs or awaiting overwrite;
+another download cannot be inserted into it. Declining overwrite skips that item
+and continues the queue. Recoverable status-query errors retain the last progress
+snapshot and retry rather than starting another transfer.
+
+Quit or termination closes admission and cancels active work, with one shared
+two-second cleanup budget; cleanup errors are reported. An ambiguous aria2 start
+or unconfirmed transfer stop closes download admission conservatively: **restart
+the application before starting more downloads**. Ambiguous mutations are not
+automatically replayed.
+
+Shutdown stops and reaps the app-owned aria2 process directly, interrupting RPC
+waits without relying on a graceful shutdown request reaching a closing socket.
 
 If you only want the direct URL, press `y` instead. That flow still shows the URL and copies it to the clipboard when possible without starting `aria2c`.
 
@@ -290,8 +325,20 @@ Batch imports preserve partial success: if some uploads fail, the successful tor
 ## Testing
 
 ```bash
-go test ./...
+make verify
+make test-race
+make build-all
 ```
+
+`verify` checks formatting, module tidiness, vet/lint, tests, and the local build.
+`build-all` cross-compiles Linux, macOS, and Windows for amd64/arm64; native
+persistence tests also run in CI. For bounded, uncached local test runs, set
+`GOFLAGS='-timeout=45s -count=1'` for `verify` and `test-race`.
+
+Download polling runs every second after the previous poll completes; torrent
+list refresh runs every five seconds. Batch delete/copy/file-selection requests
+retain a cancelable 250-millisecond delay. See [architecture and acceptance
+traceability](docs/architecture.md) for ownership, cancellation, and failure contracts.
 
 ## License
 
