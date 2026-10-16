@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/cenkalti/rpc2"
+	"github.com/cenkalti/rpc2/jsonrpc"
+	"github.com/gorilla/websocket"
 	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/pkg/models"
 	"github.com/siku2/arigo"
@@ -390,14 +392,15 @@ func (m *Manager) interrupt() {
 	m.mu.Lock()
 	rpc, ready, proc := m.rpc, m.readyRPC, m.process
 	m.mu.Unlock()
+	// Backend termination must not depend on any transport cleanup succeeding.
+	if proc != nil {
+		_ = proc.Kill()
+	}
 	if rpc != nil {
 		_ = rpc.Close()
 	}
 	if ready != nil {
 		_ = ready.Close()
-	}
-	if proc != nil {
-		_ = proc.Kill()
 	}
 }
 
@@ -694,12 +697,60 @@ func makeSecret() (string, error) {
 }
 
 func dialRPC(ctx context.Context, url string, secret string) (rpcClient, error) {
-	client, err := arigo.DialContext(ctx, url, secret)
+	conn, _, err := (&websocket.Dialer{}).DialContext(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &rpcAdapter{client: client}, nil
+	return newRPCAdapter(conn, secret), nil
 }
+
+func newRPCAdapter(conn *websocket.Conn, secret string) *rpcAdapter {
+	// Keep arigo's RPC methods and the existing JSON codec, but not its wsrpc
+	// wrapper: that wrapper flushes a mutable message writer from Close, racing
+	// active writes and potentially returning without ever closing the socket.
+	codec := jsonrpc.NewJSONCodec(&websocketStream{conn: conn})
+	client := arigo.NewClient(rpc2.NewClientWithCodec(codec), secret)
+	adapter := &rpcAdapter{client: client}
+	adapter.wg.Go(client.Run)
+	return adapter
+}
+
+// jsonrpc serializes writes; rpc2 runs one reader. Close touches neither's
+// state, only the immutable connection, whose Close supports concurrent I/O.
+type websocketStream struct {
+	conn   *websocket.Conn
+	reader io.Reader
+}
+
+func (s *websocketStream) Read(p []byte) (int, error) {
+	for {
+		if s.reader == nil {
+			_, reader, err := s.conn.NextReader()
+			if err != nil {
+				return 0, err
+			}
+			s.reader = reader
+		}
+		n, err := s.reader.Read(p)
+		if errors.Is(err, io.EOF) {
+			s.reader = nil
+			if n == 0 {
+				continue
+			}
+			return n, nil
+		}
+		return n, err
+	}
+}
+
+func (s *websocketStream) Write(p []byte) (int, error) {
+	if err := s.conn.WriteMessage(websocket.TextMessage, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (s *websocketStream) Close() error { return s.conn.Close() }
 
 type execProcess struct {
 	cmd *exec.Cmd
@@ -736,6 +787,7 @@ type rpcAdapter struct {
 	client    *arigo.Client
 	closeOnce sync.Once
 	closeErr  error
+	wg        sync.WaitGroup
 }
 
 func (r *rpcAdapter) AddURI(uris []string, options *arigo.Options) (arigo.GID, error) {
@@ -757,6 +809,9 @@ func (r *rpcAdapter) Shutdown() error {
 }
 
 func (r *rpcAdapter) Close() error {
-	r.closeOnce.Do(func() { r.closeErr = r.client.Close() })
+	r.closeOnce.Do(func() {
+		r.closeErr = r.client.Close()
+		r.wg.Wait()
+	})
 	return r.closeErr
 }

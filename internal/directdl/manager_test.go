@@ -93,10 +93,21 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 // The transport acknowledges cancellation but cannot finish until released.
 // This exposes premature shutdown completion and per-caller abandoned waiters.
-func blockedDownload(t *testing.T) (*Manager, <-chan struct{}, chan struct{}, *atomic.Int64) {
+func blockedDownload(t *testing.T) (*Manager, <-chan struct{}, func(), *atomic.Int64) {
 	t.Helper()
 	m := NewManager()
 	entered, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	releaseGate := sync.OnceFunc(func() { close(release) })
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		// Failure/Goexit must release the transport before waiting for workers.
+		releaseGate()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.Shutdown(ctx); err != nil {
+			t.Errorf("fixture shutdown: %v", err)
+		}
+	})
 	completed := new(atomic.Int64)
 	var enteredOnce, canceledOnce sync.Once
 	m.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -107,12 +118,12 @@ func blockedDownload(t *testing.T) (*Manager, <-chan struct{}, chan struct{}, *a
 		completed.Add(1)
 		return nil, r.Context().Err()
 	})
-	_, err := m.StartDownload(t.Context(), models.ManagedDownloadRequest{URL: "https://example.com/file", Dir: t.TempDir(), Filename: "file"})
+	_, err := m.StartDownload(t.Context(), models.ManagedDownloadRequest{URL: "https://example.com/file", Dir: dir, Filename: "file"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-entered
-	return m, canceled, release, completed
+	return m, canceled, releaseGate, completed
 }
 
 func TestConcurrentShutdown(t *testing.T) {
@@ -128,7 +139,7 @@ func TestConcurrentShutdown(t *testing.T) {
 		t.Fatalf("shutdown finished before worker: %v", err)
 	default:
 	}
-	close(release)
+	release()
 	for range callers {
 		if err := <-results; err != nil {
 			t.Fatal(err)
@@ -150,7 +161,7 @@ func TestShutdownDeadlineCanBeRetried(t *testing.T) {
 	}
 	<-canceled
 	_, startErr := m.StartDownload(t.Context(), models.ManagedDownloadRequest{Dir: t.TempDir(), Filename: "late"})
-	close(release)
+	release()
 	secondCloseErr := m.Shutdown(t.Context())
 	if secondCloseErr != nil {
 		t.Fatal(secondCloseErr)
@@ -160,6 +171,32 @@ func TestShutdownDeadlineCanBeRetried(t *testing.T) {
 	}
 	if completed.Load() != 1 {
 		t.Fatal("shutdown left admitted work")
+	}
+}
+
+func TestBlockedDownloadCleanupDrainsWithoutExplicitRelease(t *testing.T) {
+	var m *Manager
+	var release func()
+	var completed *atomic.Int64
+	t.Run("fixture", func(t *testing.T) {
+		m, _, release, completed = blockedDownload(t)
+		// Returning here models any early assertion/Goexit before explicit release.
+	})
+	defer func() {
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := m.Shutdown(ctx); err != nil {
+			t.Error(err)
+		}
+	}()
+	if completed.Load() != 1 {
+		t.Fatal("fixture cleanup left blocked transport worker")
+	}
+	select {
+	case <-m.done:
+	default:
+		t.Fatal("fixture cleanup did not finish shutdown")
 	}
 }
 
