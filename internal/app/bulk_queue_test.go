@@ -230,7 +230,9 @@ func TestQueueLeasePreventsInterleavedStarts(t *testing.T) {
 	if _, err := r.c.Start(t.Context(), "foreign", ""); !errors.Is(err, ErrQueueActive) {
 		t.Fatal(err)
 	}
-	r.q.Cancel(id)
+	if err := r.q.Cancel(id); err != nil {
+		t.Fatal(err)
+	}
 	finishQueue(t, r, id)
 }
 
@@ -288,7 +290,9 @@ func TestQueueStaleDecisionRejected(t *testing.T) {
 	if err := r.q.Decide(t.Context(), d); err == nil {
 		t.Fatal("accepted old item decision")
 	}
-	r.q.Cancel(id)
+	if err := r.q.Cancel(id); err != nil {
+		t.Fatal(err)
+	}
 	s := finishQueue(t, r, id)
 	if s.Items[0].Outcome.Kind != OutcomeSkipped || s.Items[1].Outcome.Kind != OutcomeCanceled {
 		t.Fatal(s)
@@ -297,7 +301,9 @@ func TestQueueStaleDecisionRejected(t *testing.T) {
 	if next <= id {
 		t.Fatal("queue identity reused")
 	}
-	r.q.Cancel(next)
+	if err := r.q.Cancel(next); err != nil {
+		t.Fatal(err)
+	}
 	finishQueue(t, r, next)
 	if _, err := r.q.Snapshot(id); err == nil {
 		t.Fatal("old queue snapshot accepted")
@@ -496,7 +502,9 @@ func TestQueueCancelDuringStart(t *testing.T) {
 	if err != nil {
 		t.Fatal("canceled admission leaked lease", err)
 	}
-	r.c.ReleaseQueue(lease)
+	if err := r.c.ReleaseQueue(lease); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestQueuePreparationAndRejectedStartContinue(t *testing.T) {
@@ -524,6 +532,41 @@ func TestQueuePreparationAndRejectedStartContinue(t *testing.T) {
 	}
 }
 
+func TestQueueReleaseFailurePreservesItemCause(t *testing.T) {
+	r := newQueueRig(t, false)
+	firstErr, lastErr := errors.New("first resolution failed"), errors.New("last resolution failed")
+	revoke := make(chan QueueLease, 1)
+	r.q.deps.Prepare = func(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
+		if target.Index == 0 {
+			return PreparedDownload{}, firstErr
+		}
+		// Revoke through the real coordinator while preparation is gated. The
+		// queue must retain its cleanup failure as well as the item failure.
+		select {
+		case lease := <-revoke:
+			if err := r.c.ReleaseQueue(lease); err != nil {
+				t.Errorf("revoke fixture lease: %v", err)
+			}
+			return PreparedDownload{}, lastErr
+		case <-ctx.Done():
+			return PreparedDownload{}, ctx.Err()
+		}
+	}
+	id := r.start(t, 2)
+	before := queueSnapshot(t, r.q, id, func(s QueueSnapshot) bool { return s.CurrentIndex == 1 })
+	if before.Items[0].Outcome == nil || !errors.Is(before.Items[0].Outcome.Err, firstErr) {
+		t.Fatal("previous item was not published before preparing the next", before)
+	}
+	revoke <- QueueLease{ID: id}
+	s := finishQueue(t, r, id)
+	if outcome := s.Items[1].Outcome; outcome.Kind != OutcomeFailed || !errors.Is(outcome.Err, lastErr) || !errors.Is(outcome.Err, ErrStaleQueue) {
+		t.Fatal("queue cleanup failure was lost", outcome)
+	}
+	if !errors.Is(s.Items[0].Outcome.Err, firstErr) || errors.Is(s.Items[0].Outcome.Err, ErrStaleQueue) || errors.Is(before.Items[0].Outcome.Err, ErrStaleQueue) {
+		t.Fatal("cleanup changed a previously published terminal outcome")
+	}
+}
+
 func TestQueueCanceledAdmissionAndRuntimeRejection(t *testing.T) {
 	r := newQueueRig(t, false)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -539,5 +582,7 @@ func TestQueueCanceledAdmissionAndRuntimeRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal("runtime rejection leaked lease", err)
 	}
-	r.c.ReleaseQueue(lease)
+	if err := r.c.ReleaseQueue(lease); err != nil {
+		t.Fatal(err)
+	}
 }

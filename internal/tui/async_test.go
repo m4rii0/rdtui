@@ -31,10 +31,6 @@ func currentDownloadResult(m Model, download models.ManagedDownload, err error) 
 	return managedDownloadStatusMsg{request: downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}, queue: m.queueIdentity(), ok: true, download: download, err: err}
 }
 
-func currentSetupResult(m Model, msg tea.Msg) featureResultMsg {
-	return featureResultMsg{feature: setupFeature, request: requestID{m.setup.Generation}, queue: m.queueIdentity(), msg: msg}
-}
-
 func (s *asyncService) Status(ctx context.Context, ref app.DownloadRef) (app.DownloadSnapshot, error) {
 	s.statusCalls.Add(1)
 	s.requestedRef = ref

@@ -95,7 +95,9 @@ func TestQueueTerminalObservationCannotResurrectTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal("old observation blocked queue", err)
 	}
-	c.ReleaseQueue(lease)
+	if err := c.ReleaseQueue(lease); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestQueueLeaseIdentityRejectsForeignControl(t *testing.T) {
@@ -183,7 +185,9 @@ func TestQueueOldReferenceCannotCancelNextAdmission(t *testing.T) {
 	if result := receive(t, results); result.err != nil {
 		t.Fatal(result)
 	}
-	c.ReleaseQueue(lease)
+	if err := c.ReleaseQueue(lease); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type backendResult struct {

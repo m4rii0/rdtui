@@ -97,7 +97,7 @@ func TestBulkOverwriteDecisionUsesItemIdentity(t *testing.T) {
 			if cmd == nil || m.mode != modeFileBrowser || m.returnMode != modeMain || m.pendingDownload != nil {
 				t.Fatal("decision lost navigation")
 			}
-			updated, _ = m.Update(cmd())
+			m.Update(cmd())
 			if s.decision != (app.QueueDecision{QueueID: 7, ItemIndex: 0, Overwrite: overwrite}) || s.startCalls != 0 {
 				t.Fatal("decision lost item identity or started backend")
 			}

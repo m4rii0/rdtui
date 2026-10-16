@@ -151,11 +151,16 @@ func (q *BulkQueue) Cancel(id QueueID) error {
 
 func (q *BulkQueue) run(ctx context.Context, s *queueState, lease QueueLease) {
 	defer s.cancel()
+	var pending *ItemOutcome
 	for i, item := range s.snapshot.Items {
 		if ctx.Err() != nil {
 			break
 		}
 		q.mu.Lock()
+		if pending != nil {
+			previous := &s.snapshot.Items[s.snapshot.CurrentIndex]
+			previous.Status, previous.Outcome = QueueItemTerminal, pending
+		}
 		s.snapshot.CurrentIndex = i
 		s.snapshot.Download = nil
 		s.snapshot.Items[i].Status = QueueItemResolving
@@ -163,10 +168,7 @@ func (q *BulkQueue) run(ctx context.Context, s *queueState, lease QueueLease) {
 		s.snapshot.ExistingBytes, s.snapshot.RemoteBytes = 0, 0
 		q.mu.Unlock()
 		outcome, abort := q.runItem(ctx, s, lease, i, item.Item)
-		q.mu.Lock()
-		s.snapshot.Items[i].Status = QueueItemTerminal
-		s.snapshot.Items[i].Outcome = new(outcome)
-		q.mu.Unlock()
+		pending = new(outcome)
 		if abort {
 			break
 		}
@@ -175,13 +177,26 @@ func (q *BulkQueue) run(ctx context.Context, s *queueState, lease QueueLease) {
 	// item worker has already awaited cancellation before reaching this point.
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	releaseErr := q.deps.Downloads.ReleaseQueue(lease)
+	if pending != nil {
+		// Publish the final item only after cleanup, so a release failure is
+		// retained without changing an already published terminal outcome.
+		if releaseErr != nil {
+			pending.Err = errors.Join(pending.Err, releaseErr)
+			if pending.Kind == OutcomeSuccess || pending.Kind == OutcomeSkipped {
+				pending.Kind = OutcomeFailed
+			}
+			pending.RemoteOutcomeUnknown = pending.RemoteOutcomeUnknown || errors.Is(releaseErr, ErrTransferStopUnconfirmed)
+		}
+		last := &s.snapshot.Items[s.snapshot.CurrentIndex]
+		last.Status, last.Outcome = QueueItemTerminal, pending
+	}
 	for i := range s.snapshot.Items {
 		if s.snapshot.Items[i].Outcome == nil {
 			s.snapshot.Items[i].Status = QueueItemTerminal
 			s.snapshot.Items[i].Outcome = new(queueOutcome(s.snapshot.Items[i].Item, OutcomeCanceled, context.Canceled))
 		}
 	}
-	q.deps.Downloads.ReleaseQueue(lease)
 	s.snapshot.AwaitingOverwrite = false
 	s.decisionPending = false
 	s.snapshot.Finished = true

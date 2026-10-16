@@ -131,14 +131,15 @@ func (t *torrentsModel) update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		var failedNames []string
 		focusID := ""
 		for _, result := range msg.result.Items {
-			if result.Kind == app.OutcomeSuccess {
+			switch result.Kind {
+			case app.OutcomeSuccess:
 				success++
 				if focusID == "" {
 					focusID = result.TorrentCreatedID
 				}
-			} else if result.Kind == app.OutcomeCanceled {
+			case app.OutcomeCanceled:
 				canceled++
-			} else {
+			default:
 				failed++
 				failedNames = append(failedNames, filepathBase(result.Source))
 			}

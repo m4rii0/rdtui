@@ -32,7 +32,11 @@ func TestRPCAdapterCloseInterruptsBlockedWrite(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
 		if tcp, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
 			_ = tcp.SetReadBuffer(1024)
 		}
@@ -128,7 +132,11 @@ func blockedProductionRPC(t *testing.T) (*rpcAdapter, *gatedWriteConn) {
 			t.Error(err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
 		<-releasePeer
 	}))
 	t.Cleanup(func() { close(releasePeer); server.Close() })
@@ -243,7 +251,11 @@ func TestRPCAdapterPreservesJSONRPCWire(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
 		methods := []string{"aria2.getVersion", "aria2.addUri", "aria2.tellStatus", "aria2.forceRemove", "aria2.addUri"}
 		results := []string{`{"version":"1.37.0","enabledFeatures":[]}`, `"owned-gid"`, `{"gid":"owned-gid","status":"active","totalLength":"12","completedLength":"3"}`, `"owned-gid"`}
 		for i, method := range methods {
