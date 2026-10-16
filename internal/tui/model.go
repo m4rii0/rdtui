@@ -726,6 +726,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		download := msg.download
 		m.download = &download
+		if msg.err != nil && download.GID != "" && !download.IsTerminal() {
+			// A cached active snapshot plus an observation error is recoverable.
+			// Keep polling this transfer; advancing would reuse it for the next item.
+			return m, nil
+		}
 		if m.bulk != nil && m.bulk.isRunning() {
 			if msg.err != nil {
 				errText := msg.err.Error()

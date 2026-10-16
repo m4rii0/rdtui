@@ -1058,6 +1058,60 @@ func TestBulkQueueContinuesAfterFailure(t *testing.T) {
 	}
 }
 
+func TestBulkStatusTransportFailureWaitsForSameDownload(t *testing.T) {
+	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
+	m := Model{
+		mode:     modeMain,
+		download: new(active),
+		bulk:     newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+	}
+	m.bulk.Items = []bulkQueueItem{
+		{TorrentID: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
+		{TorrentID: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
+	}
+	m.bulk.Current = 0
+	// The service retains this snapshot and returns the observation error separately.
+	for range 2 {
+		updated, cmd := m.Update(managedDownloadStatusMsg{ok: true, download: active, err: errors.New("temporary status transport failure")})
+		m = updated.(Model)
+		if cmd != nil || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive || m.bulk.Items[1].Status != bulkFilePending || *m.download != active {
+			t.Fatalf("status error advanced/misattributed queue: current=%d items=%+v download=%+v", m.bulk.Current, m.bulk.Items, m.download)
+		}
+		updated, cmd = m.Update(downloadTickMsg(time.Time{}))
+		m = updated.(Model)
+		if cmd == nil || m.mode != modeMain {
+			t.Fatal("background queue stopped polling after recoverable status error")
+		}
+	}
+	completed := active
+	completed.Status = models.ManagedDownloadStatusComplete
+	updated, cmd := m.Update(managedDownloadStatusMsg{ok: true, download: completed})
+	m = updated.(Model)
+	if cmd == nil || m.bulk.Current != 1 || m.bulk.Items[0].Status != bulkFileSuccess || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatalf("confirmed completion did not advance the correct item: current=%d items=%+v", m.bulk.Current, m.bulk.Items)
+	}
+	failed := models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusError, ErrorMessage: "backend terminated"}
+	updated, cmd = m.Update(managedDownloadStatusMsg{ok: true, download: failed, err: errors.New("backend terminated")})
+	m = updated.(Model)
+	if cmd != nil || !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileFailed {
+		t.Fatalf("definitive terminal error did not finish the next item: %+v", m.bulk.Items)
+	}
+}
+
+func TestSingleStatusTransportFailureKeepsPolling(t *testing.T) {
+	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
+	m := Model{mode: modeDownload, download: new(active), status: "Downloading"}
+	updated, cmd := m.Update(managedDownloadStatusMsg{ok: true, download: active, err: errors.New("temporary status transport failure")})
+	m = updated.(Model)
+	if cmd != nil || m.status != "Downloading" || *m.download != active {
+		t.Fatalf("transient query failure became download failure: status=%q download=%+v", m.status, m.download)
+	}
+	_, cmd = m.Update(downloadTickMsg(time.Time{}))
+	if cmd == nil {
+		t.Fatal("single transfer stopped polling after recoverable status error")
+	}
+}
+
 func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 	m := Model{
 		mode: modeBulkDownload,

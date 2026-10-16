@@ -90,6 +90,29 @@ func TestStartManagedDownloadReusesActiveSession(t *testing.T) {
 	}
 }
 
+func TestStartManagedDownloadRefreshesCompletionWithoutPolling(t *testing.T) {
+	fake := &fakeDownloadManager{
+		startDownload: func(_ context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+			return models.ManagedDownload{GID: req.Filename, Status: models.ManagedDownloadStatusActive}, nil
+		},
+		downloadStatus: func(_ context.Context, gid string) (models.ManagedDownload, error) {
+			if gid != "first.zip" {
+				t.Errorf("refreshed GID = %q, want first.zip", gid)
+			}
+			return models.ManagedDownload{GID: gid, Status: models.ManagedDownloadStatusComplete}, nil
+		},
+	}
+	svc := serviceWithBackend(t, fake)
+	if _, err := svc.StartManagedDownload(t.Context(), "https://example.com/first.zip", ""); err != nil {
+		t.Fatal(err)
+	}
+	// The single-download view was left, so no status polling observed completion.
+	second, err := svc.StartManagedDownload(t.Context(), "https://example.com/second.zip", "")
+	if err != nil || second.Reused || second.Download.GID != "second.zip" || second.Download.URL != "https://example.com/second.zip" || second.Download.Filename != "second.zip" || fake.startCalls.Load() != 2 {
+		t.Fatalf("unpolled completion reopened the previous transfer: %+v, %v, starts=%d", second, err, fake.startCalls.Load())
+	}
+}
+
 func TestManagedDownloadStatusPreservesCachedMetadata(t *testing.T) {
 	t.Parallel()
 

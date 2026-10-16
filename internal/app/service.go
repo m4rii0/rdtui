@@ -180,6 +180,11 @@ func (s *Service) CopyURL(url string) (bool, error) {
 }
 
 func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
+	if current, ok := s.downloads.Current(); ok && !current.Download.IsTerminal() {
+		// Legacy callers can stop polling when leaving the download view. Refresh
+		// before reuse, but let the coordinator retain ownership on query errors.
+		_, _ = s.downloads.Status(ctx, current.Ref)
+	}
 	started, err := s.downloads.Start(ctx, url, filename)
 	if err != nil {
 		return models.ManagedDownloadStart{}, err
