@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -202,6 +204,28 @@ func (s *Service) Start(ctx context.Context, url, filename string) (DownloadStar
 
 func (s *Service) Status(ctx context.Context, ref DownloadRef) (DownloadSnapshot, error) {
 	return s.downloads.Status(ctx, ref)
+}
+
+func (s *Service) CurrentDownload() (DownloadSnapshot, bool) { return s.downloads.Current() }
+
+// NewBulkQueue is temporary facade composition until all dependencies are wired
+// at the entry point. Singles and queues must share this coordinator.
+func (s *Service) NewBulkQueue(runtime *Runtime) *BulkQueue {
+	return NewBulkQueue(QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: func(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
+		return PrepareDownload(ctx, target, s.config.DefaultDownloadDir, s.ResolveDirectURL, func(path string) (int64, bool, error) {
+			info, err := os.Stat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				return 0, false, nil
+			}
+			if err != nil {
+				return 0, false, err
+			}
+			if info.IsDir() {
+				return 0, false, fmt.Errorf("download target is directory: %s", path)
+			}
+			return info.Size(), true, nil
+		})
+	}})
 }
 
 func (s *Service) SavePrivateToken(token string) error {

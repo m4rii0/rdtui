@@ -333,6 +333,7 @@ func TestRenderBulkSummaryView(t *testing.T) {
 		{TorrentID: "a", TorrentName: "Movie A", Status: bulkFileSuccess},
 		{TorrentID: "b", TorrentName: "Movie B", Status: bulkFileFailed, Error: "network"},
 	}
+	m.bulk.Snapshot.Finished = true
 	view := ansi.Strip(renderBulkDownloadView(m))
 	if !strings.Contains(view, "Bulk Download Summary") || !strings.Contains(view, "Complete:") || !strings.Contains(view, "Failed:") {
 		t.Fatalf("bulk summary view = %q", view)

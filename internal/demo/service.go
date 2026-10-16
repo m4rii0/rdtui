@@ -11,6 +11,7 @@ import (
 
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -23,10 +24,12 @@ type Service struct {
 	torrents []torrentEntry
 	nextID   int
 
-	activeDownload     *models.ManagedDownload
-	downloadGeneration uint64
-	downloadStart      time.Time
-	downloadDuration   time.Duration
+	activeDownload   *models.ManagedDownload
+	downloads        *app.DownloadCoordinator
+	transferContext  context.Context
+	downloadClosed   bool
+	downloadStart    time.Time
+	downloadDuration time.Duration
 }
 
 type torrentEntry struct {
@@ -34,8 +37,13 @@ type torrentEntry struct {
 	info    models.TorrentInfo
 }
 
-func NewService() *Service {
+func NewService(parents ...context.Context) *Service {
 	s := &Service{nextID: 100, downloadDuration: demoDownloadDuration()}
+	parent := context.Background()
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	s.downloads = app.NewDownloadCoordinator(parent, demoBackend{s}, s.Config().DefaultDownloadDir)
 	s.torrents = s.seedData()
 	return s
 }
@@ -86,7 +94,12 @@ func (s *Service) CompleteDeviceFlow(_ context.Context, _ models.DeviceCode) (*m
 func (s *Service) SavePrivateToken(_ string) error  { return nil }
 func (s *Service) OpenFile(_ string) error          { return nil }
 func (s *Service) RevealInDirectory(_ string) error { return nil }
-func (s *Service) Close() error                     { return nil }
+func (s *Service) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.CloseContext(ctx)
+}
+func (s *Service) CloseContext(ctx context.Context) error { return s.downloads.Close(ctx) }
 
 // ---------------------------------------------------------------------------
 // Torrent CRUD
@@ -226,10 +239,9 @@ func (s *Service) CopyURL(_ string) (bool, error) {
 	return true, nil
 }
 
-func (s *Service) StartManagedDownload(_ context.Context, url, filename string) (models.ManagedDownloadStart, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.startDownloadLocked(url, filename)
+func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
+	started, err := s.Start(ctx, url, filename)
+	return models.ManagedDownloadStart{Download: started.Snapshot.Download, Reused: started.Reused}, err
 }
 
 func (s *Service) startDownloadLocked(url, filename string) (models.ManagedDownloadStart, error) {
@@ -247,21 +259,29 @@ func (s *Service) startDownloadLocked(url, filename string) (models.ManagedDownl
 		Directory:   "/tmp/rdtui-demo",
 	}
 	s.activeDownload = &dl
-	s.downloadGeneration++
 	s.downloadStart = time.Now()
 	return models.ManagedDownloadStart{Download: dl}, nil
 }
 
-func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownload, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.downloadStatusLocked()
+func (s *Service) ManagedDownloadStatus(ctx context.Context) (models.ManagedDownload, bool, error) {
+	current, ok := s.downloads.Current()
+	if !ok {
+		return models.ManagedDownload{}, false, nil
+	}
+	snapshot, err := s.Status(ctx, current.Ref)
+	return snapshot.Download, true, err
 }
 
 func (s *Service) downloadStatusLocked() (models.ManagedDownload, bool, error) {
 
 	if s.activeDownload == nil {
 		return models.ManagedDownload{}, false, nil
+	}
+	if s.transferContext != nil && s.transferContext.Err() != nil && !s.activeDownload.IsTerminal() {
+		s.activeDownload.Status = models.ManagedDownloadStatusRemoved
+	}
+	if s.activeDownload.IsTerminal() {
+		return *s.activeDownload, true, nil
 	}
 
 	progress := time.Since(s.downloadStart).Seconds() / s.downloadDuration.Seconds()
@@ -279,27 +299,67 @@ func (s *Service) downloadStatusLocked() (models.ManagedDownload, bool, error) {
 }
 
 func (s *Service) Start(ctx context.Context, url, filename string) (app.DownloadStart, error) {
-	// Keep admission and reference capture under the same lock.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return app.DownloadStart{}, err
+	if current, ok := s.downloads.Current(); ok && !current.Download.IsTerminal() {
+		_, _ = s.downloads.Status(ctx, current.Ref)
 	}
-	result, err := s.startDownloadLocked(url, filename)
-	return app.DownloadStart{Snapshot: app.DownloadSnapshot{Ref: app.DownloadRef{Generation: s.downloadGeneration, GID: result.Download.GID}, Download: result.Download}, Reused: result.Reused}, err
+	return s.downloads.Start(ctx, url, filename)
 }
 
 func (s *Service) Status(ctx context.Context, ref app.DownloadRef) (app.DownloadSnapshot, error) {
+	return s.downloads.Status(ctx, ref)
+}
+
+func (s *Service) CurrentDownload() (app.DownloadSnapshot, bool) { return s.downloads.Current() }
+
+func (s *Service) NewBulkQueue(runtime *app.Runtime) *app.BulkQueue {
+	return app.NewBulkQueue(app.QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: func(ctx context.Context, target models.DownloadTarget) (app.PreparedDownload, error) {
+		return app.PrepareDownload(ctx, target, s.Config().DefaultDownloadDir, s.ResolveDirectURL, func(string) (int64, bool, error) { return 0, false, nil })
+	}})
+}
+
+// The demo uses the same coordinator/queue as production; only backend I/O is
+// simulated. No presentation polling is needed to execute the queue.
+type demoBackend struct{ service *Service }
+
+func (b demoBackend) StartDownload(ctx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+	s := b.service
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return app.DownloadSnapshot{}, err
+		return models.ManagedDownload{}, err
 	}
-	if s.activeDownload == nil || ref != (app.DownloadRef{Generation: s.downloadGeneration, GID: s.activeDownload.GID}) {
-		return app.DownloadSnapshot{}, app.ErrStaleDownload
+	if s.downloadClosed {
+		return models.ManagedDownload{}, download.ErrClosed
 	}
-	download, _, err := s.downloadStatusLocked()
-	return app.DownloadSnapshot{Ref: ref, Download: download}, err
+	s.transferContext = ctx
+	started, err := s.startDownloadLocked(req.URL, req.Filename)
+	return started.Download, err
+}
+func (b demoBackend) DownloadStatus(ctx context.Context, gid string) (models.ManagedDownload, error) {
+	s := b.service
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return models.ManagedDownload{}, err
+	}
+	if s.downloadClosed {
+		return models.ManagedDownload{}, download.ErrClosed
+	}
+	if s.activeDownload == nil || s.activeDownload.GID != gid {
+		return models.ManagedDownload{}, app.ErrStaleDownload
+	}
+	d, _, err := s.downloadStatusLocked()
+	return d, err
+}
+func (b demoBackend) Shutdown(context.Context) error {
+	s := b.service
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.downloadClosed = true
+	if s.activeDownload != nil && !s.activeDownload.IsTerminal() {
+		s.activeDownload.Status = models.ManagedDownloadStatusRemoved
+	}
+	return nil
 }
 
 func demoDownloadDuration() time.Duration {

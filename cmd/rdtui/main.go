@@ -59,9 +59,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 	var service app.AppService
+	var queue tui.BulkQueueService
 	var closeService func(context.Context) error
 	if os.Getenv("RDTUI_DEMO") == "1" {
-		service = demo.NewService()
+		svc := demo.NewService(runtime.Context())
+		service = svc
+		queue = svc.NewBulkQueue(runtime)
+		closeService = svc.CloseContext
 	} else {
 		svc, err := app.New(runtime.Context())
 		if err != nil {
@@ -69,10 +73,11 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 		}
 		closeService = svc.CloseContext
 		service = svc
+		queue = svc.NewBulkQueue(runtime)
 	}
 	defer func() { err = errors.Join(err, cleanupRuntime(runtime, closeService)) }()
 
-	program := tea.NewProgram(tui.NewModel(service, runtime), tea.WithContext(ctx))
+	program := tea.NewProgram(tui.NewModel(service, runtime, queue), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("rdtui error: %w", err)
 	}

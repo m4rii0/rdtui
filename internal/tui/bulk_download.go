@@ -1,22 +1,235 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
+// BulkQueueService is the bulk feature's application boundary. Observation
+// cannot advance, resolve, start, or cancel a queue item.
+type BulkQueueService interface {
+	Start(context.Context, app.BulkPlan) (app.QueueID, error)
+	Snapshot(app.QueueID) (app.QueueSnapshot, error)
+	Decide(context.Context, app.QueueDecision) error
+}
+
+type bulkStartedMsg struct {
+	generation uint64
+	queueID    app.QueueID
+	active     *app.DownloadSnapshot
+	err        error
+}
+type bulkSnapshotMsg struct {
+	queueID  app.QueueID
+	request  requestID
+	snapshot app.QueueSnapshot
+	err      error
+}
+type bulkTickMsg struct {
+	queueID app.QueueID
+	request requestID
+}
+type bulkDecisionMsg struct {
+	decision app.QueueDecision
+	err      error
+}
+
+func (b *bulkDownloadState) plan() app.BulkPlan {
+	plan := app.BulkPlan{Items: make([]app.QueueItem, len(b.Items))}
+	for i, item := range b.Items {
+		plan.Items[i] = app.QueueItem{TorrentID: item.TorrentID, TorrentName: item.TorrentName, Target: item.Target}
+	}
+	return plan
+}
+
+func (m Model) startBulkQueue() (tea.Model, tea.Cmd) {
+	if m.bulk.Starting || m.bulk.QueueID != 0 {
+		return m, nil
+	}
+	if m.bulkQueue == nil {
+		m.errText = "Bulk queue unavailable"
+		return m, nil
+	}
+	m.bulk.Starting = true
+	m.downloadPoll.invalidate()
+	plan, generation := m.bulk.plan(), m.queueGeneration
+	return m, operationCmd(m.runtime.Context(), m.runtime, func(ctx context.Context) tea.Msg {
+		id, err := m.bulkQueue.Start(ctx, plan)
+		msg := bulkStartedMsg{generation: generation, queueID: id, err: err}
+		if errors.Is(err, app.ErrActiveDownload) {
+			if reader, ok := m.service.(interface {
+				CurrentDownload() (app.DownloadSnapshot, bool)
+			}); ok {
+				if current, exists := reader.CurrentDownload(); exists {
+					msg.active = new(current)
+				}
+			}
+		}
+		return msg
+	})
+}
+
+func (m Model) handleBulkStarted(msg bulkStartedMsg) (tea.Model, tea.Cmd) {
+	if m.bulk == nil || msg.generation != m.queueGeneration || !m.bulk.Starting {
+		return m, nil
+	}
+	m.bulk.Starting = false
+	m.loading = false
+	if msg.err != nil {
+		m.errText = msg.err.Error()
+		if msg.active != nil {
+			m.downloadRef, m.download = msg.active.Ref, new(msg.active.Download)
+			m.downloadTorrentID = "" // Never attribute an unrelated transfer to this plan.
+			if m.mode == modeBulkDownload {
+				m.returnMode, m.mode = modeBulkConfirm, modeDownload
+			}
+			cmd := m.pollDownload()
+			return m, cmd
+		}
+		if m.mode == modeBulkDownload {
+			m.mode = modeBulkConfirm
+		}
+		return m, nil
+	}
+	m.bulk.QueueID = msg.queueID
+	m.bulk.Snapshot = app.QueueSnapshot{ID: msg.queueID, CurrentIndex: -1}
+	m.errText = ""
+	cmd := m.pollBulkQueue()
+	return m, cmd
+}
+
+func (m *Model) pollBulkQueue() tea.Cmd {
+	if m.bulk == nil || m.bulk.QueueID == 0 || m.bulk.isFinished() || m.queuePoll.InFlight {
+		return nil
+	}
+	ctx, request := m.queuePoll.begin(m.runtime.Context())
+	id := m.bulk.QueueID
+	return operationCmd(ctx, m.runtime, func(context.Context) tea.Msg {
+		snapshot, err := m.bulkQueue.Snapshot(id)
+		return bulkSnapshotMsg{queueID: id, request: request, snapshot: snapshot, err: err}
+	})
+}
+
+func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
+	if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
+		return m, nil
+	}
+	previous := m.bulk.Snapshot
+	if msg.err == nil {
+		s := msg.snapshot
+		if s.ID != msg.queueID || s.CurrentIndex < previous.CurrentIndex || previous.Finished && !s.Finished {
+			return m, nil
+		}
+		if s.CurrentIndex == previous.CurrentIndex && s.Download != nil && previous.Download != nil &&
+			(s.Download.Ref.Generation < previous.Download.Ref.Generation || s.Download.Ref.Generation == previous.Download.Ref.Generation && s.Download.Ref.GID != previous.Download.Ref.GID) {
+			return m, nil
+		}
+	}
+	m.queuePoll.invalidate()
+	if msg.err != nil {
+		// A transient observation error retains the last snapshot and retries.
+		return m, m.nextBulkPoll()
+	}
+	m.bulk.Snapshot = msg.snapshot
+	m.bulk.renderSnapshot()
+	m.loading = false
+	m.download = nil
+	if msg.snapshot.Download != nil {
+		m.downloadRef = msg.snapshot.Download.Ref
+		m.download = new(msg.snapshot.Download.Download)
+	}
+	if pending := m.pendingDownload; pending != nil && pending.Queue != nil && pending.Queue.QueueID == msg.queueID &&
+		(pending.Queue.ItemIndex != msg.snapshot.CurrentIndex || !msg.snapshot.AwaitingOverwrite) {
+		m.mode = pending.ResumeMode
+		m.pendingDownload = nil
+	}
+	if msg.snapshot.Finished {
+		if m.pendingDownload != nil && m.pendingDownload.Queue != nil && m.pendingDownload.Queue.QueueID == msg.queueID {
+			m.mode = m.pendingDownload.ResumeMode
+			m.pendingDownload = nil
+		}
+		success, failed, skipped := m.bulk.resultCounts()
+		m.status = "Bulk download complete: " + bulkSummaryLine(success, failed, skipped)
+		if canceled := m.bulk.canceledCount(); canceled > 0 {
+			m.status += fmt.Sprintf(", %d canceled", canceled)
+		}
+		return m, nil
+	}
+	if item := m.bulk.currentItem(); item != nil {
+		m.status = fmt.Sprintf("Bulk downloading %d/%d: %s", m.bulk.Current+1, len(m.bulk.Items), bulkItemLabel(*item))
+	}
+	if msg.snapshot.AwaitingOverwrite {
+		decision := app.QueueDecision{QueueID: msg.queueID, ItemIndex: msg.snapshot.CurrentIndex}
+		if m.bulk.DecidedItem == nil || m.bulk.DecidedItem.QueueID != decision.QueueID || m.bulk.DecidedItem.ItemIndex != decision.ItemIndex {
+			if m.pendingDownload == nil || m.pendingDownload.Queue == nil || *m.pendingDownload.Queue != decision {
+				m.pendingDownload = &pendingDownloadState{Queue: new(decision), ResumeMode: m.mode, Path: msg.snapshot.ExistingPath,
+					Filename: filepath.Base(msg.snapshot.ExistingPath), RemoteBytes: msg.snapshot.RemoteBytes, ExistingBytes: msg.snapshot.ExistingBytes}
+				m.mode = modeOverwrite
+				m.status = "Existing file found"
+			}
+		}
+	}
+	return m, m.nextBulkPoll()
+}
+
+func (m Model) nextBulkPoll() tea.Cmd {
+	return m.after(downloadRefreshInterval, bulkTickMsg{m.bulk.QueueID, requestID{m.queuePoll.Generation}})
+}
+
+func (m Model) decideBulkOverwrite(decision app.QueueDecision, overwrite bool) (tea.Model, tea.Cmd) {
+	if m.bulk == nil || decision.QueueID != m.bulk.QueueID || decision.ItemIndex != m.bulk.Current || m.bulk.isFinished() {
+		return m, nil
+	}
+	decision.Overwrite = overwrite
+	m.bulk.DecidedItem = new(decision)
+	m.errText = ""
+	return m, operationCmd(m.runtime.Context(), m.runtime, func(ctx context.Context) tea.Msg {
+		return bulkDecisionMsg{decision: decision, err: m.bulkQueue.Decide(ctx, decision)}
+	})
+}
+
+// Items is a rendering projection only; all transitions come from the snapshot.
+func (b *bulkDownloadState) renderSnapshot() {
+	b.Current = b.Snapshot.CurrentIndex
+	b.Items = make([]bulkQueueItem, len(b.Snapshot.Items))
+	for i, item := range b.Snapshot.Items {
+		row := bulkQueueItem{TorrentID: item.Item.TorrentID, TorrentName: item.Item.TorrentName, Target: item.Item.Target, Status: bulkFilePending}
+		if item.Status != app.QueueItemPending {
+			row.Status = bulkFileActive
+		}
+		if item.Outcome != nil {
+			row.Status = bulkFileStatus(item.Outcome.Kind)
+			if item.Outcome.Err != nil {
+				row.Error = item.Outcome.Err.Error()
+			}
+			if item.Outcome.RemoteOutcomeUnknown {
+				row.Error += " (remote outcome unknown; not replayed)"
+			}
+		}
+		if i == b.Current && b.Snapshot.Download != nil {
+			row.Filename = b.Snapshot.Download.Download.Filename
+		}
+		b.Items[i] = row
+	}
+}
+
 type bulkFileStatus string
 
 const (
-	bulkFilePending bulkFileStatus = "pending"
-	bulkFileActive  bulkFileStatus = "active"
-	bulkFileSuccess bulkFileStatus = "success"
-	bulkFileFailed  bulkFileStatus = "failed"
-	bulkFileSkipped bulkFileStatus = "skipped"
+	bulkFilePending  bulkFileStatus = "pending"
+	bulkFileActive   bulkFileStatus = "active"
+	bulkFileSuccess  bulkFileStatus = "success"
+	bulkFileFailed   bulkFileStatus = "failed"
+	bulkFileSkipped  bulkFileStatus = "skipped"
+	bulkFileCanceled bulkFileStatus = "canceled"
 )
 
 type bulkTorrentPlan struct {
@@ -36,14 +249,19 @@ type bulkQueueItem struct {
 }
 
 type bulkDownloadState struct {
-	Plans           []bulkTorrentPlan
-	Cursor          int
-	FilePrompt      int
-	FileCursor      int
-	Items           []bulkQueueItem
-	Current         int
-	CleanupCursor   int
-	CleanupSelected map[string]bool
+	QueueID            app.QueueID
+	Snapshot           app.QueueSnapshot
+	Starting           bool
+	CleanupInitialized bool
+	DecidedItem        *app.QueueDecision
+	Plans              []bulkTorrentPlan
+	Cursor             int
+	FilePrompt         int
+	FileCursor         int
+	Items              []bulkQueueItem
+	Current            int
+	CleanupCursor      int
+	CleanupSelected    map[string]bool
 }
 
 func newBulkDownloadState(torrents []models.Torrent) *bulkDownloadState {
@@ -217,45 +435,8 @@ func (b *bulkDownloadState) currentItem() *bulkQueueItem {
 	return &b.Items[b.Current]
 }
 
-func (b *bulkDownloadState) startNextItem() *bulkQueueItem {
-	next := b.nextPendingIndex()
-	if next < 0 {
-		b.Current = -1
-		return nil
-	}
-	b.Current = next
-	b.Items[next].Status = bulkFileActive
-	return &b.Items[next]
-}
-
-func (b *bulkDownloadState) finishCurrent(status bulkFileStatus, filename string, errText string) {
-	item := b.currentItem()
-	if item == nil {
-		return
-	}
-	item.Status = status
-	if filename != "" {
-		item.Filename = filename
-	}
-	item.Error = errText
-	b.Current = -1
-}
-
-func (b *bulkDownloadState) isRunning() bool {
-	item := b.currentItem()
-	return item != nil && item.Status == bulkFileActive
-}
-
 func (b *bulkDownloadState) isFinished() bool {
-	if b == nil || len(b.Items) == 0 {
-		return false
-	}
-	for _, item := range b.Items {
-		if item.Status == bulkFilePending || item.Status == bulkFileActive {
-			return false
-		}
-	}
-	return true
+	return b != nil && b.Snapshot.Finished
 }
 
 func (b *bulkDownloadState) resultCounts() (success int, failed int, skipped int) {
@@ -277,7 +458,17 @@ func (b *bulkDownloadState) resultCounts() (success int, failed int, skipped int
 
 func (b *bulkDownloadState) completedCount() int {
 	success, failed, skipped := b.resultCounts()
-	return success + failed + skipped
+	return success + failed + skipped + b.canceledCount()
+}
+
+func (b *bulkDownloadState) canceledCount() int {
+	count := 0
+	for _, item := range b.Items {
+		if item.Status == bulkFileCanceled {
+			count++
+		}
+	}
+	return count
 }
 
 func (b *bulkDownloadState) filesForTorrent(id string) []bulkQueueItem {
@@ -302,6 +493,7 @@ func (b *bulkDownloadState) torrentOutcome(id string) string {
 	failed := 0
 	skipped := 0
 	pending := 0
+	canceled := 0
 	for _, item := range items {
 		switch item.Status {
 		case bulkFileSuccess:
@@ -310,6 +502,8 @@ func (b *bulkDownloadState) torrentOutcome(id string) string {
 			failed++
 		case bulkFileSkipped:
 			skipped++
+		case bulkFileCanceled:
+			canceled++
 		default:
 			pending++
 		}
@@ -321,10 +515,13 @@ func (b *bulkDownloadState) torrentOutcome(id string) string {
 		return "complete"
 	}
 	if success > 0 {
-		return fmt.Sprintf("partial: %d/%d files failed", failed+skipped, len(items))
+		return fmt.Sprintf("partial: %d/%d files failed", failed+skipped+canceled, len(items))
 	}
 	if failed > 0 {
 		return "failed"
+	}
+	if canceled > 0 {
+		return "canceled"
 	}
 	return "skipped"
 }
@@ -334,9 +531,10 @@ func (b *bulkDownloadState) torrentCleanupSafe(id string) bool {
 }
 
 func (b *bulkDownloadState) initCleanupSelection() {
-	if b == nil {
+	if b == nil || b.CleanupInitialized {
 		return
 	}
+	b.CleanupInitialized = true
 	b.CleanupSelected = map[string]bool{}
 	for _, plan := range b.Plans {
 		if b.torrentCleanupSafe(plan.ID) {
@@ -434,7 +632,7 @@ func bulkStatusStyle(status bulkFileStatus) lipgloss.Style {
 		return okStyle
 	case bulkFileFailed:
 		return errorStyle
-	case bulkFileSkipped:
+	case bulkFileSkipped, bulkFileCanceled:
 		return warnStyle
 	case bulkFileActive:
 		return infoStyle
@@ -725,7 +923,7 @@ func bulkQueueStatusGlyph(status bulkFileStatus) string {
 		return "✓"
 	case bulkFileFailed:
 		return "✗"
-	case bulkFileSkipped:
+	case bulkFileSkipped, bulkFileCanceled:
 		return "-"
 	case bulkFileActive:
 		return "▶"
@@ -742,6 +940,8 @@ func bulkQueueStatusLabel(status bulkFileStatus) string {
 		return "failed"
 	case bulkFileSkipped:
 		return "skipped"
+	case bulkFileCanceled:
+		return "canceled"
 	case bulkFileActive:
 		return "active"
 	default:
@@ -772,6 +972,9 @@ func renderBulkSummaryPanel(m Model, width int) string {
 		fmt.Sprintf("  %s  %s", mutedStyle.Render("Failed:     "), errorStyle.Render(fmt.Sprintf("%d", failed))),
 		fmt.Sprintf("  %s  %s", mutedStyle.Render("Skipped:    "), warnStyle.Render(fmt.Sprintf("%d", skipped))),
 		"",
+	}
+	if canceled := m.bulk.canceledCount(); canceled > 0 {
+		stats = append(stats, fmt.Sprintf("  %s  %d", mutedStyle.Render("Canceled:   "), canceled), "")
 	}
 	for _, plan := range m.bulk.Plans {
 		outcome := m.bulk.torrentOutcome(plan.ID)

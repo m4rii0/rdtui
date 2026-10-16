@@ -25,6 +25,33 @@ func TestDefaultFileSelectionChoosesLargestFile(t *testing.T) {
 	}
 }
 
+func TestServiceBulkQueueSharesSingleDownloadAdmission(t *testing.T) {
+	svc := serviceWithBackend(t, &fakeDownloadManager{startDownload: func(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+		return models.ManagedDownload{GID: "single", Status: models.ManagedDownloadStatusActive}, nil
+	}})
+	started, err := svc.Start(t.Context(), "https://example.com/single", "single")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRuntime(t.Context())
+	t.Cleanup(func() {
+		r.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := r.Wait(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	_, err = svc.NewBulkQueue(r).Start(t.Context(), BulkPlan{})
+	if !errors.Is(err, ErrActiveDownload) {
+		t.Fatalf("queue did not reject unrelated transfer: %v", err)
+	}
+	current, ok := svc.CurrentDownload()
+	if !ok || current.Ref != started.Snapshot.Ref {
+		t.Fatal("cannot reopen unrelated transfer")
+	}
+}
+
 func TestValidTorrentFilesFiltersAndDeduplicates(t *testing.T) {
 	valid, invalid := ValidTorrentFiles([]string{"/tmp/a.torrent", "/tmp/a.torrent", "/tmp/b.txt", "/tmp/c.TORRENT"})
 	if !reflect.DeepEqual(valid, []string{"/tmp/a.torrent", "/tmp/c.TORRENT"}) {

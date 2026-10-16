@@ -119,6 +119,9 @@ func (m *Model) requestDetail(id string) tea.Cmd {
 }
 
 func (m *Model) pollDownload() tea.Cmd {
+	if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
+		return nil
+	}
 	if m.downloadPoll.InFlight || m.download == nil || m.download.IsTerminal() || m.runtime.Context().Err() != nil {
 		return nil
 	}

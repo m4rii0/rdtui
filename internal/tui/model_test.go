@@ -1014,7 +1014,9 @@ func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
 }
 
 func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
+	queue := &queueServiceSpy{}
 	m := Model{runtime: newTestRuntime(t),
+		bulkQueue:     queue,
 		mode:          modeBulkConfirm,
 		batchMode:     true,
 		batchSelected: map[string]bool{"a": true, "b": true},
@@ -1031,87 +1033,71 @@ func TestBulkFinalConfirmationStartsFirstQueuedFile(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd == nil {
-		t.Fatal("expected resolve command for first queued file")
+		t.Fatal("expected queue admission command")
 	}
-	if m.mode != modeBulkDownload || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive {
+	if m.mode != modeBulkDownload || !m.bulk.Starting || m.bulk.Items[0].Status != bulkFilePending {
 		t.Fatalf("bulk state = mode %q current %d status %q", m.mode, m.bulk.Current, m.bulk.Items[0].Status)
 	}
 	if m.batchMode || len(m.batchSelected) != 0 {
 		t.Fatal("expected batch selection cleared once bulk queue starts")
 	}
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if m.bulk.QueueID != 7 || queue.startCalls != 1 || len(queue.plan.Items) != 2 || queue.plan.Items[0].TorrentID != "a" || queue.plan.Items[1].TorrentID != "b" {
+		t.Fatal("confirmation did not submit the ordered plan once")
+	}
 }
 
 func TestBulkQueueContinuesAfterFailure(t *testing.T) {
-	m := Model{runtime: newTestRuntime(t),
-		mode:       modeBulkDownload,
-		returnMode: modeBulkDownload,
-		bulk:       newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
+	m, s := observedQueue(t)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeFailed, Err: errors.New("resolve failed")}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd := updateQueue(m, s.snapshot)
+	if cmd == nil || m.bulk.Items[0].Status != bulkFileFailed || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
+		t.Fatal("failed item was not rendered with the next active item")
 	}
-	m.bulk.Items = []bulkQueueItem{
-		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
-		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
-	}
-	m.bulk.Current = 0
-
-	updated, cmd := m.Update(currentSetupResult(m, resolvedDownloadMsg{err: errors.New("resolve failed")}))
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected command to start next queued file after failure")
-	}
-	if m.bulk.Items[0].Status != bulkFileFailed || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive {
-		t.Fatalf("bulk items after failure = %+v current=%d", m.bulk.Items, m.bulk.Current)
-	}
-
-	updated, cmd = m.Update(currentSetupResult(m, managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}}))
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected status polling after managed download starts")
-	}
-	updated, cmd = m.Update(currentDownloadResult(m, models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}, nil))
-	m = updated.(Model)
-	if cmd != nil {
-		t.Fatal("expected no command after queue finishes")
-	}
-	if !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess {
-		t.Fatalf("bulk state after completion = %+v", m.bulk.Items)
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeSuccess}
+	m, cmd = updateQueue(m, s.snapshot)
+	if cmd != nil || !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileSuccess || s.startCalls != 0 {
+		t.Fatal("completion started work instead of rendering the outcome")
 	}
 }
 
 func TestBulkStatusTransportFailureWaitsForSameDownload(t *testing.T) {
 	active := models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusActive}
-	m := Model{runtime: newTestRuntime(t),
-		mode:     modeMain,
-		download: new(active),
-		bulk:     newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
-	}
-	m.bulk.Items = []bulkQueueItem{
-		{TorrentID: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
-		{TorrentID: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
-	}
-	m.bulk.Current = 0
-	// The service retains this snapshot and returns the observation error separately.
+	m, s := observedQueue(t)
+	m.mode = modeMain
+	s.snapshot.Download = &app.DownloadSnapshot{Ref: app.DownloadRef{Generation: 1, GID: "gid-1"}, Download: active}
+	m, _ = updateQueue(m, s.snapshot)
+	// Observation errors retain the last valid application snapshot.
 	for range 2 {
-		updated, cmd := m.Update(currentDownloadResult(m, active, errors.New("temporary status transport failure")))
+		updated, cmd := m.Update(bulkSnapshotMsg{queueID: 7, request: requestID{m.queuePoll.Generation}, err: errors.New("temporary status transport failure")})
 		m = updated.(Model)
 		if cmd == nil || m.bulk.Current != 0 || m.bulk.Items[0].Status != bulkFileActive || m.bulk.Items[1].Status != bulkFilePending || *m.download != active {
 			t.Fatalf("status error advanced/misattributed queue: current=%d items=%+v download=%+v", m.bulk.Current, m.bulk.Items, m.download)
 		}
-		updated, cmd = m.Update(downloadTickMsg{downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}})
+		updated, cmd = m.Update(bulkTickMsg{7, requestID{m.queuePoll.Generation}})
 		m = updated.(Model)
 		if cmd == nil || m.mode != modeMain {
 			t.Fatal("background queue stopped polling after recoverable status error")
 		}
 	}
-	completed := active
-	completed.Status = models.ManagedDownloadStatusComplete
-	updated, cmd := m.Update(currentDownloadResult(m, completed, nil))
-	m = updated.(Model)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeSuccess}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd := updateQueue(m, s.snapshot)
 	if cmd == nil || m.bulk.Current != 1 || m.bulk.Items[0].Status != bulkFileSuccess || m.bulk.Items[1].Status != bulkFileActive {
 		t.Fatalf("confirmed completion did not advance the correct item: current=%d items=%+v", m.bulk.Current, m.bulk.Items)
 	}
-	failed := models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusError, ErrorMessage: "backend terminated"}
-	updated, cmd = m.Update(currentDownloadResult(m, failed, errors.New("backend terminated")))
-	m = updated.(Model)
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeFailed, Err: errors.New("backend terminated")}
+	m, cmd = updateQueue(m, s.snapshot)
 	if cmd != nil || !m.bulk.isFinished() || m.bulk.Items[1].Status != bulkFileFailed {
 		t.Fatalf("definitive terminal error did not finish the next item: %+v", m.bulk.Items)
 	}
@@ -1144,6 +1130,7 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 		{TorrentID: "b", TorrentName: "partial", Status: bulkFileSuccess},
 		{TorrentID: "b", TorrentName: "partial", Status: bulkFileFailed, Error: "network"},
 	}
+	m.bulk.Snapshot.Finished = true
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(Model)
@@ -1165,18 +1152,7 @@ func TestBulkCleanupDefaultsAndManualToggle(t *testing.T) {
 }
 
 func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
-	m := Model{runtime: newTestRuntime(t),
-		mode:        modeBulkDownload,
-		downloadDir: t.TempDir(),
-		download:    &models.ManagedDownload{GID: "gid-1", Status: models.ManagedDownloadStatusActive},
-		bulk:        newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "a"}, {ID: "b", Filename: "b"}}),
-	}
-	m.bulk.Items = []bulkQueueItem{
-		{TorrentID: "a", TorrentName: "a", Target: models.DownloadTarget{Link: "https://example.com/a", Label: "a.mkv"}, Status: bulkFileActive},
-		{TorrentID: "b", TorrentName: "b", Target: models.DownloadTarget{Link: "https://example.com/b", Label: "b.mkv"}, Status: bulkFilePending},
-	}
-	m.bulk.Current = 0
-
+	m, s := observedQueue(t)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 	if cmd != nil {
@@ -1189,7 +1165,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("status = %q, want background status", m.status)
 	}
 
-	updated, cmd = m.Update(downloadTickMsg{downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}})
+	updated, cmd = m.Update(bulkTickMsg{7, requestID{m.queuePoll.Generation}})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected background bulk download polling after leaving view")
@@ -1198,10 +1174,13 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("mode = %q, want to stay in modeMain while polling", m.mode)
 	}
 
-	updated, cmd = m.Update(currentDownloadResult(m, models.ManagedDownload{GID: "gid-1", Filename: "a.mkv", Status: models.ManagedDownloadStatusComplete}, nil))
-	m = updated.(Model)
+	s.snapshot.CurrentIndex = 1
+	s.snapshot.Items[0].Status = app.QueueItemTerminal
+	s.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeSuccess}
+	s.snapshot.Items[1].Status = app.QueueItemActive
+	m, cmd = updateQueue(m, s.snapshot)
 	if cmd == nil {
-		t.Fatal("expected command to start next queued file in background")
+		t.Fatal("expected background observation to continue")
 	}
 	if m.mode != modeMain {
 		t.Fatalf("mode = %q, want background queue to preserve modeMain", m.mode)
@@ -1210,26 +1189,10 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("bulk state = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 
-	updated, cmd = m.Update(currentSetupResult(m, resolvedDownloadMsg{url: "https://example.com/b", filename: "b.mkv", filesize: 100}))
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected command to start resolved background bulk item")
-	}
-	if m.mode != modeMain {
-		t.Fatalf("mode = %q, want resolved background item to preserve modeMain", m.mode)
-	}
-
-	updated, cmd = m.Update(currentSetupResult(m, managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}}))
-	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected polling command after background managed download starts")
-	}
-	if m.mode != modeMain {
-		t.Fatalf("mode = %q, want background managed download start to preserve modeMain", m.mode)
-	}
-
-	updated, cmd = m.Update(currentDownloadResult(m, models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusComplete}, nil))
-	m = updated.(Model)
+	s.snapshot.Finished = true
+	s.snapshot.Items[1].Status = app.QueueItemTerminal
+	s.snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeSuccess}
+	m, cmd = updateQueue(m, s.snapshot)
 	if cmd != nil {
 		t.Fatal("expected no command after background queue finishes")
 	}

@@ -104,6 +104,8 @@ type targetPickerState struct {
 
 type Model struct {
 	service         app.AppService
+	bulkQueue       BulkQueueService
+	queuePoll       asyncRequest
 	runtime         *app.Runtime
 	auth            asyncRequest
 	list            asyncRequest
@@ -162,7 +164,7 @@ type Model struct {
 }
 
 type pendingDownloadState struct {
-	Queue         *queueIdentity
+	Queue         *app.QueueDecision
 	ResumeMode    mode
 	URL           string
 	Filename      string
@@ -263,7 +265,11 @@ type devicePollTickMsg struct{ request requestID }
 
 type downloadTickMsg struct{ request downloadRequestID }
 
-func NewModel(service app.AppService, runtime *app.Runtime) Model {
+func NewModel(service app.AppService, runtime *app.Runtime, queues ...BulkQueueService) Model {
+	var queue BulkQueueService
+	if len(queues) > 0 {
+		queue = queues[0]
+	}
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.SetWidth(64)
@@ -280,6 +286,7 @@ func NewModel(service app.AppService, runtime *app.Runtime) Model {
 	)
 	return Model{
 		service:       service,
+		bulkQueue:     queue,
 		runtime:       runtime,
 		version:       version.Current(),
 		mode:          modeStarting,
@@ -300,14 +307,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	queueResult := false
 	if result, ok := msg.(featureResultMsg); ok {
 		state := m.feature(result.feature)
 		if !state.current(result.request) || (result.feature == setupFeature && result.queue != m.queueIdentity()) {
 			return m, nil
 		}
-		// Route by the admitted request's owner, not mutable navigation state.
-		queueResult = result.feature == setupFeature && m.bulk != nil && m.bulk.isRunning() && result.queue == m.queueIdentity()
 		state.InFlight = false
 		if result.feature != authFeature {
 			state.invalidate()
@@ -315,6 +319,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg = result.msg
 	}
 	switch msg := msg.(type) {
+	case bulkStartedMsg:
+		return m.handleBulkStarted(msg)
+	case bulkSnapshotMsg:
+		return m.handleBulkSnapshot(msg)
+	case bulkTickMsg:
+		if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
+			return m, nil
+		}
+		cmd := m.pollBulkQueue()
+		return m, cmd
+	case bulkDecisionMsg:
+		if m.bulk == nil || msg.decision.QueueID != m.bulk.QueueID || msg.decision.ItemIndex != m.bulk.Current {
+			return m, nil
+		}
+		if msg.err != nil && !errors.Is(msg.err, app.ErrStaleQueue) {
+			m.errText = msg.err.Error()
+		}
+		return m, nil
 	case operationErrorMsg:
 		m.loading = false
 		m.errText = msg.err.Error()
@@ -420,12 +442,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case downloadTickMsg:
-		if !m.downloadPoll.current(msg.request.Request) || msg.request.Ref != m.downloadRef {
+		if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
 			return m, nil
 		}
-		if m.bulk != nil && m.bulk.isRunning() && m.download != nil && !m.download.IsTerminal() {
-			cmd := m.pollDownload()
-			return m, cmd
+		if !m.downloadPoll.current(msg.request.Request) || msg.request.Ref != m.downloadRef {
+			return m, nil
 		}
 		if m.mode != modeDownload || m.download == nil || m.download.IsTerminal() {
 			return m, nil
@@ -732,35 +753,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.downloadPoll.invalidate()
 		m.downloadRef = msg.ref
 		m.loading = false
-		if queueResult {
-			foreground := m.mode == modeBulkDownload || m.mode == modeBulkConfirm
-			if msg.err != nil {
-				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
-				return m.startNextBulkItem()
-			}
-			download := msg.result.Download
-			m.download = &download
-			if foreground {
-				m.mode = modeBulkDownload
-			}
-			m.errText = ""
-			if msg.result.Reused {
-				m.status = "Reopened active bulk download: " + download.Filename
-			} else {
-				m.status = "Started bulk download: " + download.Filename
-			}
-			if download.IsTerminal() {
-				if download.IsComplete() {
-					m.bulk.finishCurrent(bulkFileSuccess, download.Filename, "")
-				} else {
-					m.bulk.finishCurrent(bulkFileFailed, download.Filename, download.ErrorMessage)
-				}
-				return m.startNextBulkItem()
-			}
-			cmd := m.pollDownload()
-			return m, cmd
-		}
 		if msg.err != nil {
+			if errors.Is(msg.err, app.ErrQueueActive) && m.bulk != nil {
+				m.mode = modeBulkDownload
+				return m, nil
+			}
 			m.errText = msg.err.Error()
 			return m, nil
 		}
@@ -782,20 +779,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resolvedDownloadMsg:
 		m.loading = false
 		if msg.err != nil {
-			if queueResult {
-				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
-				return m.startNextBulkItem()
-			}
 			m.errText = msg.err.Error()
 			return m, nil
 		}
 		path := filepath.Join(m.downloadDir, msg.filename)
 		existingBytes, exists, err := existingFileSize(path)
 		if err != nil {
-			if queueResult {
-				m.bulk.finishCurrent(bulkFileFailed, msg.filename, err.Error())
-				return m.startNextBulkItem()
-			}
 			m.errText = err.Error()
 			return m, nil
 		}
@@ -808,9 +797,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				RemoteBytes:   msg.filesize,
 				ExistingBytes: existingBytes,
 			}
-			if queueResult {
-				m.pendingDownload.Queue = new(m.queueIdentity())
-			}
 			m.mode = modeOverwrite
 			m.errText = ""
 			m.status = "Existing file found"
@@ -819,6 +805,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startPendingDownload(msg.url, msg.filename)
 
 	case managedDownloadStatusMsg:
+		if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
+			return m, nil // The queue, not a single-download observation, owns progress.
+		}
 		if !m.downloadPoll.current(msg.request.Request) || msg.request.Ref != m.downloadRef || msg.queue != m.queueIdentity() {
 			return m, nil
 		}
@@ -833,25 +822,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		download := msg.download
 		m.download = &download
-		if m.bulk != nil && m.bulk.isRunning() {
-			if msg.err != nil {
-				errText := msg.err.Error()
-				if download.ErrorMessage != "" {
-					errText = download.ErrorMessage
-				}
-				m.bulk.finishCurrent(bulkFileFailed, download.Filename, errText)
-				return m.startNextBulkItem()
-			}
-			if download.IsComplete() {
-				m.bulk.finishCurrent(bulkFileSuccess, download.Filename, "")
-				return m.startNextBulkItem()
-			}
-			if download.IsError() {
-				m.bulk.finishCurrent(bulkFileFailed, download.Filename, download.ErrorMessage)
-				return m.startNextBulkItem()
-			}
-			return m, m.nextDownloadPoll()
-		}
 		if msg.err != nil {
 			m.status = "Managed download failed"
 			m.errText = ""
@@ -1088,6 +1058,10 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionRefresh:
 		switch m.mode {
 		case modeDownload, modeBulkDownload:
+			if m.mode == modeBulkDownload && m.bulk != nil && !m.bulk.isFinished() {
+				cmd := m.pollBulkQueue()
+				return m, cmd
+			}
 			if m.mode == modeBulkDownload && (m.bulk == nil || m.bulk.isFinished()) {
 				m.loading = true
 				cmd := m.refresh()
@@ -1443,6 +1417,10 @@ func (m Model) handleCopyAction() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDownloadAction() (tea.Model, tea.Cmd) {
+	if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
+		m.mode = modeBulkDownload
+		return m, nil
+	}
 	if m.mode == modeMain {
 		if m.batchMode {
 			if !m.canBulkDownloadSelection() {
@@ -1551,13 +1529,7 @@ func (m Model) handlePopupCancel() (tea.Model, tea.Cmd) {
 		m.pendingDownload = nil
 		if pending != nil && pending.Queue != nil {
 			m.mode = pending.ResumeMode
-			if m.bulk == nil || !m.bulk.isRunning() || *pending.Queue != m.queueIdentity() {
-				return m, nil
-			}
-			m.setup.invalidate()
-			m.bulk.finishCurrent(bulkFileSkipped, pending.Filename, "existing file skipped")
-			m.errText = ""
-			return m.startNextBulkItem()
+			return m.decideBulkOverwrite(*pending.Queue, false)
 		}
 		m.setup.invalidate()
 		m.mode = m.returnMode
@@ -1654,7 +1626,7 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 		m.download = nil
 		m.status = "Starting bulk download"
 		m.errText = ""
-		return m.startNextBulkItem()
+		return m.startBulkQueue()
 	case modeBulkCleanup:
 		if m.bulk == nil {
 			return m, nil
@@ -1685,11 +1657,10 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pendingDownload.Queue != nil {
-			m.mode = m.pendingDownload.ResumeMode
-			if m.bulk == nil || !m.bulk.isRunning() || *m.pendingDownload.Queue != m.queueIdentity() {
-				m.pendingDownload = nil
-				return m, nil
-			}
+			pending := m.pendingDownload
+			m.pendingDownload = nil
+			m.mode = pending.ResumeMode
+			return m.decideBulkOverwrite(*pending.Queue, true)
 		}
 		return m.startPendingDownload(m.pendingDownload.URL, m.pendingDownload.Filename)
 	case modeShowURL:
@@ -1733,6 +1704,10 @@ func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) beginBulkDownloadSetup() (tea.Model, tea.Cmd) {
+	if m.bulk != nil && (m.bulk.QueueID != 0 && !m.bulk.isFinished() || m.bulk.Starting) {
+		m.mode = modeBulkDownload
+		return m, nil
+	}
 	selected := make([]models.Torrent, 0, len(m.batchSelected))
 	for _, torrent := range m.visibleTorrents() {
 		if m.batchSelected[torrent.ID] {
@@ -1795,37 +1770,6 @@ func (m Model) startBulkFileSelectionSubmit() (tea.Model, tea.Cmd) {
 	m.status = "Submitting bulk file selections"
 	m.errText = ""
 	return m, bulkFileSelectionSubmitCmd(m.runtime.Context(), m.runtime, m.service, submissions, m.bulkSelect.Outcomes)
-}
-
-func (m Model) startNextBulkItem() (tea.Model, tea.Cmd) {
-	m.setup.invalidate()
-	m.downloadPoll.invalidate()
-	if m.bulk == nil {
-		return m, nil
-	}
-	foreground := m.mode == modeBulkDownload || m.mode == modeBulkConfirm
-	item := m.bulk.startNextItem()
-	if item == nil {
-		m.loading = false
-		m.download = nil
-		if foreground {
-			m.mode = modeBulkDownload
-		}
-		success, failed, skipped := m.bulk.resultCounts()
-		m.status = "Bulk download complete: " + bulkSummaryLine(success, failed, skipped)
-		m.errText = ""
-		return m, nil
-	}
-	if foreground {
-		m.returnMode = modeBulkDownload
-		m.mode = modeBulkDownload
-	}
-	m.download = nil
-	m.loading = true
-	m.status = fmt.Sprintf("Bulk downloading %d/%d: %s", m.bulk.Current+1, len(m.bulk.Items), bulkItemLabel(*item))
-	m.errText = ""
-	cmd := m.resolveDownload(item.Target)
-	return m, cmd
 }
 
 func (m Model) View() tea.View {

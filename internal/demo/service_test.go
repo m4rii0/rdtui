@@ -1,10 +1,78 @@
 package demo
 
 import (
+	"context"
+	"errors"
+	"runtime"
 	"testing"
+	"time"
 
+	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
+
+func TestDemoBulkQueueUsesSharedAdmissionAndRunsWithoutUI(t *testing.T) {
+	s := NewService(t.Context())
+	r := app.NewRuntime(t.Context())
+	t.Cleanup(func() {
+		r.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := s.CloseContext(ctx); err != nil {
+			t.Error(err)
+		}
+		if err := r.Wait(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	s.downloadDuration = time.Hour
+	started, err := s.Start(t.Context(), "single", "single")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := s.NewBulkQueue(r)
+	if _, err := q.Start(t.Context(), app.BulkPlan{}); !errors.Is(err, app.ErrActiveDownload) {
+		t.Fatalf("queue reused unrelated single: %v", err)
+	}
+	current, ok := s.CurrentDownload()
+	if !ok || current.Ref != started.Snapshot.Ref {
+		t.Fatal("missing active transfer")
+	}
+	// Complete the offline backend before retrying admission.
+	s.mu.Lock()
+	s.downloadDuration = time.Nanosecond
+	s.mu.Unlock()
+	if _, err := s.Status(t.Context(), started.Snapshot.Ref); err != nil {
+		t.Fatal(err)
+	}
+	id, err := q.Start(t.Context(), app.BulkPlan{Items: []app.QueueItem{
+		{TorrentID: "a", Target: models.DownloadTarget{Link: "a", Label: "a.iso"}},
+		{TorrentID: "b", Target: models.DownloadTarget{Link: "b", Label: "b.iso"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	for {
+		snapshot, err := q.Snapshot(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.Finished {
+			for _, item := range snapshot.Items {
+				if item.Outcome == nil || item.Outcome.Kind != app.OutcomeSuccess {
+					t.Fatalf("outcome: %+v", item)
+				}
+			}
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("demo queue did not progress without UI")
+		}
+		runtime.Gosched()
+	}
+}
 
 func TestAddedTorrentFilenames(t *testing.T) {
 	for _, tt := range []struct{ method, input, want string }{
