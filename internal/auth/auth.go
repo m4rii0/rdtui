@@ -15,21 +15,24 @@ var ErrNoValidCredentials = errors.New("no valid credentials")
 
 type Manager struct {
 	store  *config.Store
-	cfg    config.Config
+	prefs  *config.Repository
+	cfg    config.EffectiveConfig
 	client *realdebrid.Client
 }
 
-func NewManager(store *config.Store, cfg config.Config) *Manager {
+func NewManager(store *config.Store, prefs *config.Repository) *Manager {
+	cfg := prefs.Effective()
 	return &Manager{
 		store:  store,
+		prefs:  prefs,
 		cfg:    cfg,
 		client: realdebrid.NewClient("", cfg.APIBaseURL, cfg.OAuthBaseURL),
 	}
 }
 
 func (m *Manager) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
-	if m.cfg.PrivateToken != "" {
-		return m.ValidateAndPersistToken(ctx, m.cfg.PrivateToken, false)
+	if token := m.prefs.EffectivePrivateToken(); token != "" {
+		return m.ValidateAndPersistToken(ctx, token, false)
 	}
 
 	creds, err := m.store.LoadDeviceCredentials()
@@ -46,8 +49,7 @@ func (m *Manager) ValidateAndPersistToken(ctx context.Context, token string, per
 		return nil, err
 	}
 	if persist {
-		m.cfg.PrivateToken = token
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.prefs.SavePrivateToken(token); err != nil {
 			return nil, err
 		}
 	}
@@ -96,6 +98,5 @@ func (m *Manager) sessionFromDeviceCredentials(ctx context.Context, creds *model
 }
 
 func (m *Manager) ClearPrivateToken() error {
-	m.cfg.PrivateToken = ""
-	return m.store.SaveConfig(m.cfg)
+	return m.prefs.SavePrivateToken("")
 }

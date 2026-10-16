@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"sync/atomic"
@@ -238,14 +241,88 @@ func TestServiceStatusFailureKeepsActiveDownload(t *testing.T) {
 func TestNewDownloadManagerSelectsDirectBackend(t *testing.T) {
 	t.Parallel()
 
-	manager := newDownloadManager(config.Config{DownloadBackend: string(models.DownloadBackendDirect)})
+	manager := newDownloadManager(config.EffectiveConfig{DownloadBackend: models.DownloadBackendDirect})
 	if _, ok := manager.(*directdl.Manager); !ok {
 		t.Fatalf("manager = %T, want *directdl.Manager", manager)
 	}
 
-	manager = newDownloadManager(config.Config{DownloadBackend: string(models.DownloadBackendAria2)})
+	manager = newDownloadManager(config.EffectiveConfig{DownloadBackend: models.DownloadBackendAria2})
 	if _, ok := manager.(*aria2.Manager); !ok {
 		t.Fatalf("manager = %T, want *aria2.Manager", manager)
+	}
+}
+
+func TestEveryBackendEntryUsesDirectDefault(t *testing.T) {
+	for _, backend := range []string{"", "invalid", "direct", "aria2"} {
+		t.Run(backend, func(t *testing.T) {
+			manager := newDownloadManager(config.EffectiveConfig{DownloadBackend: models.DownloadBackend(backend)})
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := manager.Shutdown(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+			if backend == "aria2" {
+				if _, ok := manager.(*aria2.Manager); !ok {
+					t.Fatalf("explicit aria2 = %T", manager)
+				}
+			} else if _, ok := manager.(*directdl.Manager); !ok {
+				t.Fatalf("backend %q = %T, want direct", backend, manager)
+			}
+		})
+	}
+}
+
+func TestExplicitTokenAuthenticationPreservesPreferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer entered-token" {
+			t.Errorf("validated token = %q", r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":1,"username":"entered-user"}`)
+	}))
+	t.Cleanup(server.Close)
+	for key, value := range map[string]string{
+		"XDG_CONFIG_HOME": t.TempDir(), "APPDATA": t.TempDir(), "HOME": t.TempDir(), "USERPROFILE": t.TempDir(),
+		"RDTUI_PRIVATE_TOKEN": "environment-token", "RDTUI_API_BASE_URL": server.URL, "RDTUI_OAUTH_BASE_URL": server.URL,
+	} {
+		t.Setenv(key, value)
+	}
+	svc, err := New(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := svc.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	// Authentication and persistence must use the composition-time endpoints.
+	t.Setenv("RDTUI_API_BASE_URL", "http://invalid.invalid")
+	t.Setenv("RDTUI_PRIVATE_TOKEN", "later-environment-token")
+	session, err := svc.AuthenticateWithToken(t.Context(), "entered-token", true)
+	if err != nil || session.Token != "entered-token" {
+		t.Fatalf("explicit authentication = %+v, %v", session, err)
+	}
+	store, err := config.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.LoadPreferences()
+	if err != nil || persisted != (config.Config{PrivateToken: "entered-token"}) {
+		t.Fatalf("auth persisted effective values: %+v, %v", persisted, err)
+	}
+	if err := svc.SavePrivateToken("second-entered-token"); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err = store.LoadPreferences()
+	if err != nil || persisted != (config.Config{PrivateToken: "second-entered-token"}) {
+		t.Fatalf("facade persisted effective values: %+v, %v", persisted, err)
+	}
+	if svc.Config().PrivateToken != "environment-token" || svc.Config().APIBaseURL != server.URL {
+		t.Fatal("save changed the effective environment snapshot")
 	}
 }
 
@@ -284,5 +361,13 @@ func serviceWithBackend(t *testing.T, backend download.Backend) *Service {
 			t.Errorf("coordinator cleanup: %v", err)
 		}
 	})
-	return &Service{config: config.Config{DefaultDownloadDir: "/tmp/downloads"}, downloads: c}
+	store := config.NewStoreAt(t.TempDir())
+	if err := store.SaveConfig(config.Config{DefaultDownloadDir: "/tmp/downloads"}); err != nil {
+		t.Fatal(err)
+	}
+	prefs, err := config.NewRepository(store, config.Overrides{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Service{prefs: prefs, downloads: c}
 }

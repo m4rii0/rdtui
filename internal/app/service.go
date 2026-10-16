@@ -20,8 +20,7 @@ import (
 )
 
 type Service struct {
-	store     *config.Store
-	config    config.Config
+	prefs     *config.Repository
 	auth      *auth.Manager
 	client    *realdebrid.Client
 	session   *models.AuthSession
@@ -33,29 +32,42 @@ func New(parent context.Context) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := store.LoadConfig()
+	// Capture process inputs once; preference saves never reread the environment.
+	overrides := config.Overrides{
+		PrivateToken: os.Getenv("RDTUI_PRIVATE_TOKEN"),
+		APIBaseURL:   os.Getenv("RDTUI_API_BASE_URL"),
+		OAuthBaseURL: os.Getenv("RDTUI_OAUTH_BASE_URL"),
+	}
+	home, _ := os.UserHomeDir() // Resolve reports a missing home only when needed.
+	prefs, err := config.NewRepository(store, overrides, home)
 	if err != nil {
 		return nil, err
 	}
+	cfg := prefs.Effective()
 	return &Service{
-		store:     store,
-		config:    cfg,
-		auth:      auth.NewManager(store, cfg),
+		prefs:     prefs,
+		auth:      auth.NewManager(store, prefs),
 		downloads: NewDownloadCoordinator(parent, newDownloadManager(cfg), cfg.DefaultDownloadDir),
 	}, nil
 }
 
-func newDownloadManager(cfg config.Config) download.Backend {
-	switch models.DownloadBackend(cfg.DownloadBackend) {
-	case models.DownloadBackendDirect:
-		return directdl.NewManager()
-	default:
+func newDownloadManager(cfg config.EffectiveConfig) download.Backend {
+	switch cfg.DownloadBackend {
+	case models.DownloadBackendAria2:
 		return aria2.NewManager(cfg.Aria2BinaryPath)
+	default:
+		return directdl.NewManager()
 	}
 }
 
 func (s *Service) Config() config.Config {
-	return s.config
+	// Temporary facade view for the TUI; it is never used for persistence.
+	cfg := s.prefs.Effective()
+	return config.Config{
+		PrivateToken: cfg.PrivateToken, DefaultDownloadDir: cfg.DefaultDownloadDir,
+		DownloadBackend: string(cfg.DownloadBackend), Aria2BinaryPath: cfg.Aria2BinaryPath,
+		APIBaseURL: cfg.APIBaseURL, OAuthBaseURL: cfg.OAuthBaseURL,
+	}
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
@@ -71,9 +83,6 @@ func (s *Service) AuthenticateWithToken(ctx context.Context, token string, persi
 	session, err := s.auth.ValidateAndPersistToken(ctx, token, persist)
 	if err != nil {
 		return nil, err
-	}
-	if persist {
-		s.config.PrivateToken = token
 	}
 	s.setSession(session)
 	return session, nil
@@ -235,7 +244,7 @@ func (s *Service) NewBulkQueue(runtime *Runtime) *BulkQueue {
 }
 
 func (s *Service) PrepareDownload(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
-	return PrepareDownload(ctx, target, s.config.DefaultDownloadDir, s.ResolveDirectURL, func(path string) (int64, bool, error) {
+	return PrepareDownload(ctx, target, s.prefs.Effective().DefaultDownloadDir, s.ResolveDirectURL, func(path string) (int64, bool, error) {
 		info, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, false, nil
@@ -251,8 +260,7 @@ func (s *Service) PrepareDownload(ctx context.Context, target models.DownloadTar
 }
 
 func (s *Service) SavePrivateToken(token string) error {
-	s.config.PrivateToken = token
-	return s.store.SaveConfig(s.config)
+	return s.prefs.SavePrivateToken(token)
 }
 
 func (s *Service) OpenFile(path string) error {
@@ -295,5 +303,6 @@ func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
 
 func (s *Service) setSession(session *models.AuthSession) {
 	s.session = session
-	s.client = realdebrid.NewClient(session.Token, s.config.APIBaseURL, s.config.OAuthBaseURL)
+	cfg := s.prefs.Effective()
+	s.client = realdebrid.NewClient(session.Token, cfg.APIBaseURL, cfg.OAuthBaseURL)
 }

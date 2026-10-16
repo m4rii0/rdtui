@@ -35,7 +35,11 @@ func TestBootstrapPrefersConfiguredPrivateToken(t *testing.T) {
 		t.Fatalf("SaveDeviceCredentials() error = %v", err)
 	}
 
-	manager := NewManager(store, cfg)
+	prefs, err := config.NewRepository(store, config.Overrides{}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, prefs)
 	session, err := manager.Bootstrap(t.Context())
 	if err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
