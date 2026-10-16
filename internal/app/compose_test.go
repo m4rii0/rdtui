@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -284,6 +285,10 @@ func TestApplicationCloseDuringRefresh(t *testing.T) {
 	if err := f.options.Store.SaveDeviceCredentials(creds); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.ReadFile(f.options.Store.AuthPath())
+	if err != nil {
+		t.Fatal(err)
+	}
 	transport := f.options.HTTPClient.Transport
 	entered, canceled := make(chan struct{}), make(chan struct{})
 	f.options.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -317,9 +322,13 @@ func TestApplicationCloseDuringRefresh(t *testing.T) {
 	if err := receive(t, result); !errors.Is(err, context.Canceled) {
 		t.Fatalf("request survived shutdown: %v", err)
 	}
-	saved, err := f.options.Store.LoadDeviceCredentials()
-	if err != nil || *saved != creds {
-		t.Fatalf("interrupted refresh changed durable credentials: %+v %v", saved, err)
+	after, err := os.ReadFile(f.options.Store.AuthPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare persisted bytes, not time.Time's location-dependent representation.
+	if !bytes.Equal(after, before) {
+		t.Fatal("interrupted refresh changed durable credentials")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
