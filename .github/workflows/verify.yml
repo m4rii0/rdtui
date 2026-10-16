@@ -52,5 +52,6 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Native filesystem tests
+      # Includes Windows literal-path/native Shell and owned-helper regressions.
+      - name: Native filesystem and desktop boundary tests
         run: go test ./internal/config ./internal/directdl ./internal/download

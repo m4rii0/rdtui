@@ -131,11 +131,7 @@ func openCommand(ctx context.Context, path string, reveal bool) (*exec.Cmd, erro
 		}
 		return exec.CommandContext(ctx, "xdg-open", path), nil
 	case "windows":
-		if reveal {
-			// Wait for the launcher shell, not Explorer itself.
-			return exec.CommandContext(ctx, "cmd", "/c", "start", "", "explorer", "/select,", path), nil
-		}
-		return exec.CommandContext(ctx, "cmd", "/c", "start", "", path), nil
+		return windowsOpenCommand(ctx, path, reveal)
 	default:
 		return nil, fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}

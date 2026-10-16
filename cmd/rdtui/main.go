@@ -31,6 +31,13 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if handled, err := download.RunDesktopHelper(os.Stdin); handled {
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	runtime := app.NewRuntime(ctx)

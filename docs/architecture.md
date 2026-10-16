@@ -71,8 +71,16 @@ the helper immediately; otherwise the cap keeps a stalled clipboard/open/reveal
 operation finite even when its caller cannot propagate cancellation through the
 port. `exec.CommandContext.Run` kills and waits for the owned helper PID, not a
 process group; intentionally launched application descendants are not killed or
-waited for. macOS `open` does not use `-W`; Windows reveal uses `cmd /c start` so
-Explorer itself is not the owned helper. A **100ms `WaitDelay`** bounds inherited
+waited for. macOS `open` does not use `-W`. Windows open/reveal starts an owned
+copy of rdtui in a private helper mode (not a CLI command), passing the filename
+only through stdin. The helper calls `ShellExecuteExW` with a literal UTF-16 file
+and no parameters/environment expansion, or parses a Shell item and calls
+`SHOpenFolderAndSelectItems` for reveal. No filename enters `cmd`, PowerShell,
+Explorer arguments, or other command-interpreter text. COM runs on one initialized
+STA thread. Native calls live inside the killable helper, never a detached
+unbounded goroutine; Explorer/the opened application is not owned or killed.
+The helper clears its private mode before handing off to applications. A
+**100ms `WaitDelay`** bounds inherited
 pipe-copy waits after helper exit/cancellation. These bounds do not enlarge the
 2-second shutdown budget. Unusually slow helpers can time out and need manual
 retry; native launcher/clipboard behavior still needs platform testing. Legacy
