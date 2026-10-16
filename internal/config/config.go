@@ -141,7 +141,7 @@ func (s *Store) saveJSON(path string, value any) error {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := atomicWrite(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
