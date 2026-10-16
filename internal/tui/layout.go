@@ -49,6 +49,6 @@ func renderCompactMain(m Model) string {
 	} else {
 		lines = append(lines, "No torrents")
 	}
-	lines = append(lines, "? help · ↑↓ move · esc back", renderFeedback(m, m.width))
+	lines = append(lines, "F6 activity · ? help · ↑↓ move", renderActivity(m, m.width), renderFeedback(m, m.width))
 	return boundView(strings.Join(lines, "\n"), m.width, m.height)
 }

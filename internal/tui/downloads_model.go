@@ -39,6 +39,7 @@ type downloadsModel struct {
 	showURL           string
 	download          *models.ManagedDownload
 	downloadTorrentID string
+	observationFailed bool
 	bulk              *bulkDownloadState
 }
 
@@ -103,12 +104,13 @@ func (d *downloadsModel) update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !d.downloadPoll.current(msg.request.Request) || msg.request.Ref != d.downloadRef {
 			return *m, nil
 		}
-		if m.mode != modeDownload || d.download == nil || d.download.IsTerminal() {
+		if d.download == nil || d.download.IsTerminal() {
 			return *m, nil
 		}
 		cmd := m.pollDownload()
 		return *m, cmd
 	case managedDownloadMsg:
+		d.observationFailed = false
 		d.downloadPoll.invalidate()
 		d.downloadRef = msg.ref
 		m.loading = false
@@ -158,12 +160,14 @@ func (d *downloadsModel) update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		d.downloadPoll.invalidate()
 		m.loading = false
 		if !msg.ok || (msg.err != nil && !msg.download.IsTerminal()) {
+			d.observationFailed = true
 			if d.download != nil && !d.download.IsTerminal() {
 				return *m, m.nextDownloadPoll()
 			}
 			return *m, nil
 		}
 		d.download = new(msg.download)
+		d.observationFailed = false
 		if msg.err != nil || d.download.IsError() {
 			m.status = "Managed download failed"
 			m.errText = ""

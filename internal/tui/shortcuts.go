@@ -18,7 +18,8 @@ const (
 	actionHelpPageUp   shortcutAction = "help-page-up"
 	actionHelpPageDown shortcutAction = "help-page-down"
 
-	actionQuit shortcutAction = "quit"
+	actionQuit         shortcutAction = "quit"
+	actionOpenActivity shortcutAction = "open-activity"
 
 	actionMoveUp       shortcutAction = "move-up"
 	actionMoveDown     shortcutAction = "move-down"
@@ -255,6 +256,9 @@ func (m Model) matchShortcut(msg tea.KeyPressMsg) (shortcutAction, bool) {
 
 func globalShortcutDefs(m Model, includeHelpToggle bool) []shortcutDef {
 	defs := []shortcutDef{}
+	if activityBase(m.mode) {
+		defs = append(defs, shortcut(actionOpenActivity, shortcutGroupNavigation, 0, []string{"f6"}, "F6", "activity"))
+	}
 	if includeHelpToggle && m.canShowHelp() {
 		defs = append(defs, shortcut(actionToggleHelp, shortcutGroupGlobal, 100, []string{"?"}, "?", "help"))
 	}

@@ -122,8 +122,8 @@ func renderMain(m Model) string {
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
-	lines := []string{header, table, oneLine(renderSearchBar(m), innerWidth), mutedStyle.Render("No active download"), renderFeedback(m, innerWidth)}
-	footer := "? help  ·  ↑↓ move  ·  " + renderShortcutFooter(m.renderShortcutDefs(), m)
+	lines := []string{header, table, oneLine(renderSearchBar(m), innerWidth), renderActivity(m, innerWidth), renderFeedback(m, innerWidth)}
+	footer := activityFooter(m, innerWidth)
 	if m.mode == modeMain && m.batchMode {
 		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
 	}
@@ -178,17 +178,7 @@ func renderDetailView(m Model) string {
 		lines = append(lines, panelStyle.Width(innerWidth).Render(strings.Join(detailLines, "\n")))
 	}
 
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderDownloadView(m Model) string {
@@ -230,17 +220,7 @@ func renderDownloadView(m Model) string {
 		}
 		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(stats, "\n")))
 	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderTorrentList(m Model, width, height int) string {

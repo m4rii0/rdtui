@@ -836,17 +836,7 @@ func renderBulkDownloadView(m Model) string {
 	} else {
 		lines = append(lines, renderBulkProgressPanel(m, innerWidth))
 	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderBulkProgressPanel(m Model, width int) string {

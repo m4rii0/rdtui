@@ -114,13 +114,14 @@ type Model struct {
 	status     string
 	errText    string
 
-	input       textinput.Model
-	inputPrompt string
-	inputAction inputAction
-	spinner     spinner.Model
-	helpVisible bool
-	helpOffset  int
-	flash       flashState
+	input              textinput.Model
+	inputPrompt        string
+	inputAction        inputAction
+	spinner            spinner.Model
+	helpVisible        bool
+	helpOffset         int
+	activityReturnMode mode
+	flash              flashState
 }
 
 type pendingDownloadState struct {
@@ -558,6 +559,8 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionCloseHelp:
 		m.helpVisible = false
 		return m, nil
+	case actionOpenActivity:
+		return m.openActivity()
 	case actionQuit:
 		if m.mode == modeMain && m.filterApplied {
 			m.filterApplied = false
@@ -718,6 +721,11 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		m.mode = modeMain
 		return m, nil
 	case actionBack:
+		if (m.mode == modeDownload || m.mode == modeBulkDownload) && m.activityReturnMode != "" {
+			m.mode = m.activityReturnMode
+			m.activityReturnMode = ""
+			return m, nil
+		}
 		switch m.mode {
 		case modeDetail:
 			m.detailRequest.invalidate()
