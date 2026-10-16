@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -64,5 +65,102 @@ func TestCompositionIgnoresStaleAuthenticationRejection(t *testing.T) {
 	updated, _ = m.Update(torrentsMsg{err: &realdebrid.APIError{StatusCode: 401}})
 	if updated.(Model).mode != modeMain {
 		t.Fatal("old-token API rejection invalidated new session")
+	}
+}
+
+func TestCompositionQueueRejectionIsConsumedBeforeReauthentication(t *testing.T) {
+	m, queue := observedQueue(t)
+	m.session = &models.AuthSession{User: models.User{Username: "old"}}
+	snapshot := queue.snapshot
+	snapshot.Items = slices.Clone(snapshot.Items)
+	snapshot.CurrentIndex = 1
+	snapshot.Items[0].Status = app.QueueItemTerminal
+	snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeFailed,
+		Err: errors.Join(auth.ErrNoValidCredentials, &realdebrid.APIError{StatusCode: 401})}
+	snapshot.Items[1].Status = app.QueueItemActive
+	m, _ = updateQueue(m, snapshot)
+	if m.mode != modeAuthChoice || m.session != nil {
+		t.Fatalf("fresh queue rejection did not request authentication: %s", m.mode)
+	}
+	if m.bulk.Snapshot.Items[0].Outcome == nil {
+		t.Error("rejection snapshot was not retained for display and acknowledgement")
+	}
+
+	updated, _ := m.Update(authMsg{session: &models.AuthSession{User: models.User{Username: "replacement"}}})
+	m = updated.(Model)
+	updated, _ = m.handleDownloadAction()
+	m = updated.(Model)
+	if m.mode != modeBulkDownload {
+		t.Fatal("could not reopen background queue after login")
+	}
+	queue.snapshot = snapshot
+	updated, poll := m.handleShortcutAction(actionRefresh)
+	m = updated.(Model)
+	if poll == nil {
+		t.Fatal("reopened queue did not poll")
+	}
+	updated, _ = m.Update(poll())
+	m = updated.(Model)
+	if m.mode != modeBulkDownload || m.session == nil || m.session.User.Username != "replacement" {
+		t.Fatalf("historical queue rejection invalidated replacement session: mode=%s session=%+v", m.mode, m.session)
+	}
+	if outcome := m.bulk.Snapshot.Items[0].Outcome; outcome == nil || outcome.Kind != app.OutcomeFailed || !errors.Is(outcome.Err, auth.ErrNoValidCredentials) {
+		t.Fatalf("historical failure was erased: %+v", outcome)
+	}
+
+	// A different newly failed item still reports a current rejection, even
+	// though the snapshot also retains the already acknowledged first failure.
+	snapshot.Items = slices.Clone(snapshot.Items)
+	snapshot.Items[1].Status = app.QueueItemTerminal
+	snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeFailed, Err: auth.ErrNoValidCredentials}
+	snapshot.Finished = true
+	m, _ = updateQueue(m, snapshot)
+	if m.mode != modeAuthChoice || m.session != nil {
+		t.Fatal("fresh queue rejection was suppressed with historical failures")
+	}
+}
+
+func TestCompositionStaleQueueRejectionIsNotConsumed(t *testing.T) {
+	for _, stale := range []string{"queue", "request", "snapshot queue", "item", "download", "finished"} {
+		t.Run(stale, func(t *testing.T) {
+			m, queue := observedQueue(t)
+			m.session = &models.AuthSession{User: models.User{Username: "replacement"}}
+			snapshot := queue.snapshot
+			snapshot.Items = slices.Clone(snapshot.Items)
+			snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeFailed, Err: auth.ErrNoValidCredentials}
+			msg := bulkSnapshotMsg{queueID: 7, request: requestID{m.queuePoll.Generation}, snapshot: snapshot}
+			switch stale {
+			case "queue":
+				msg.queueID = 6
+			case "request":
+				msg.request.Generation++
+			case "snapshot queue":
+				msg.snapshot.ID = 6
+			case "item":
+				m.bulk.Snapshot.CurrentIndex = 1
+			case "download":
+				m.bulk.Snapshot.Download = &app.DownloadSnapshot{Ref: app.DownloadRef{Generation: 2, GID: "current"}}
+				msg.snapshot.Download = &app.DownloadSnapshot{Ref: app.DownloadRef{Generation: 1, GID: "old"}}
+			case "finished":
+				m.bulk.Snapshot.Finished = true
+			}
+			updated, cmd := m.Update(msg)
+			m = updated.(Model)
+			if cmd != nil || m.mode != modeBulkDownload || m.session == nil {
+				t.Fatal("stale rejection changed current authentication/navigation")
+			}
+			if m.bulk.Snapshot.Items[0].Outcome != nil {
+				t.Fatal("stale rejection snapshot was accepted")
+			}
+			// The same outcome must still be actionable when a valid current
+			// observation arrives: ignoring a stale result must not acknowledge it.
+			snapshot.CurrentIndex = m.bulk.Snapshot.CurrentIndex
+			snapshot.Download = m.bulk.Snapshot.Download
+			snapshot.Finished = m.bulk.Snapshot.Finished
+			m, _ = updateQueue(m, snapshot)
+			if m.mode != modeAuthChoice || m.session != nil {
+				t.Fatal("stale result consumed a current rejection")
+			}
+		})
 	}
 }

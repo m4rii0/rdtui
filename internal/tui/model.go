@@ -276,6 +276,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg = result.msg
 	}
 	if err := m.authenticationRequired(msg); err != nil {
+		if snapshot, ok := msg.(bulkSnapshotMsg); ok && snapshot.err == nil {
+			// Accept terminal outcomes before leaving for authentication. The
+			// retained snapshot acknowledges them without erasing failure history.
+			updated, _ := m.handleBulkSnapshot(snapshot)
+			m = updated.(Model)
+		}
 		m.auth.invalidate()
 		m.list.invalidate()
 		m.detailRequest.invalidate()
@@ -379,12 +385,18 @@ func (m Model) authenticationRequired(msg tea.Msg) error {
 		}
 		err = msg.err
 	case bulkSnapshotMsg:
-		if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
+		if !m.acceptsBulkSnapshot(msg) {
 			return nil
 		}
 		err = msg.err
-		for _, item := range msg.snapshot.Items {
+		previous := m.bulk.Snapshot
+		for index, item := range msg.snapshot.Items {
 			if item.Outcome != nil {
+				// Outcomes are immutable per queue/item. Previously accepted
+				// failures are history, not new rejections of a replacement session.
+				if previous.ID == msg.queueID && index < len(previous.Items) && previous.Items[index].Outcome != nil {
+					continue
+				}
 				items = append(items, *item.Outcome)
 			}
 		}

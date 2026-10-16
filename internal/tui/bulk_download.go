@@ -115,20 +115,27 @@ func (m *Model) pollBulkQueue() tea.Cmd {
 	})
 }
 
-func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
+func (m Model) acceptsBulkSnapshot(msg bulkSnapshotMsg) bool {
 	if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
-		return m, nil
+		return false
 	}
 	previous := m.bulk.Snapshot
 	if msg.err == nil {
 		s := msg.snapshot
 		if s.ID != msg.queueID || s.CurrentIndex < previous.CurrentIndex || previous.Finished && !s.Finished {
-			return m, nil
+			return false
 		}
 		if s.CurrentIndex == previous.CurrentIndex && s.Download != nil && previous.Download != nil &&
 			(s.Download.Ref.Generation < previous.Download.Ref.Generation || s.Download.Ref.Generation == previous.Download.Ref.Generation && s.Download.Ref.GID != previous.Download.Ref.GID) {
-			return m, nil
+			return false
 		}
+	}
+	return true
+}
+
+func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
+	if !m.acceptsBulkSnapshot(msg) {
+		return m, nil
 	}
 	m.queuePoll.invalidate()
 	if msg.err != nil {
