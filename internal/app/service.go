@@ -18,13 +18,12 @@ import (
 )
 
 type Service struct {
-	store          *config.Store
-	config         config.Config
-	auth           *auth.Manager
-	client         *realdebrid.Client
-	session        *models.AuthSession
-	downloader     download.Backend
-	activeDownload *models.ManagedDownload
+	store     *config.Store
+	config    config.Config
+	auth      *auth.Manager
+	client    *realdebrid.Client
+	session   *models.AuthSession
+	downloads *DownloadCoordinator
 }
 
 func New() (*Service, error) {
@@ -37,10 +36,10 @@ func New() (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		store:      store,
-		config:     cfg,
-		auth:       auth.NewManager(store, cfg),
-		downloader: newDownloadManager(cfg),
+		store:     store,
+		config:    cfg,
+		auth:      auth.NewManager(store, cfg),
+		downloads: NewDownloadCoordinator(context.Background(), newDownloadManager(cfg), cfg.DefaultDownloadDir),
 	}, nil
 }
 
@@ -181,62 +180,20 @@ func (s *Service) CopyURL(url string) (bool, error) {
 }
 
 func (s *Service) StartManagedDownload(ctx context.Context, url, filename string) (models.ManagedDownloadStart, error) {
-	if current, ok, err := s.ManagedDownloadStatus(ctx); err == nil && ok && !current.IsTerminal() {
-		return models.ManagedDownloadStart{Download: current, Reused: true}, nil
-	}
-
-	request := models.ManagedDownloadRequest{
-		URL:      url,
-		Dir:      s.config.DefaultDownloadDir,
-		Filename: download.FilenameForURL(url, filename),
-	}
-	started, err := s.downloader.StartDownload(ctx, request)
+	started, err := s.downloads.Start(ctx, url, filename)
 	if err != nil {
 		return models.ManagedDownloadStart{}, err
 	}
-	if started.URL == "" {
-		started.URL = url
-	}
-	if started.Filename == "" {
-		started.Filename = request.Filename
-	}
-	if started.Directory == "" {
-		started.Directory = request.Dir
-	}
-	s.activeDownload = &started
-	return models.ManagedDownloadStart{Download: started}, nil
+	return models.ManagedDownloadStart{Download: started.Snapshot.Download, Reused: started.Reused}, nil
 }
 
 func (s *Service) ManagedDownloadStatus(ctx context.Context) (models.ManagedDownload, bool, error) {
-	if s.activeDownload == nil {
+	current, ok := s.downloads.Current()
+	if !ok {
 		return models.ManagedDownload{}, false, nil
 	}
-
-	status, err := s.downloader.DownloadStatus(ctx, s.activeDownload.GID)
-	if err != nil {
-		failed := *s.activeDownload
-		if !failed.IsTerminal() {
-			failed.Status = models.ManagedDownloadStatusError
-		}
-		failed.ErrorMessage = err.Error()
-		s.activeDownload = &failed
-		return failed, true, err
-	}
-
-	if status.URL == "" {
-		status.URL = s.activeDownload.URL
-	}
-	if status.Filename == "" {
-		status.Filename = s.activeDownload.Filename
-	}
-	if status.Directory == "" {
-		status.Directory = s.activeDownload.Directory
-	}
-	if status.FilePath == "" {
-		status.FilePath = s.activeDownload.FilePath
-	}
-	s.activeDownload = &status
-	return status, true, nil
+	status, err := s.downloads.Status(ctx, current.Ref)
+	return status.Download, true, err
 }
 
 func (s *Service) SavePrivateToken(token string) error {
@@ -255,7 +212,7 @@ func (s *Service) RevealInDirectory(path string) error {
 func (s *Service) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return s.downloader.Shutdown(ctx)
+	return s.downloads.Close(ctx)
 }
 
 func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
