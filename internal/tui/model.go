@@ -293,11 +293,14 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	queueResult := false
 	if result, ok := msg.(featureResultMsg); ok {
 		state := m.feature(result.feature)
 		if !state.current(result.request) || (result.feature == setupFeature && result.queue != m.queueIdentity()) {
 			return m, nil
 		}
+		// Route by the admitted request's owner, not mutable navigation state.
+		queueResult = result.feature == setupFeature && m.bulk != nil && m.bulk.isRunning() && result.queue == m.queueIdentity()
 		state.InFlight = false
 		if result.feature != authFeature {
 			state.invalidate()
@@ -701,7 +704,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.downloadPoll.invalidate()
 		m.downloadRef = msg.ref
 		m.loading = false
-		if m.returnMode == modeBulkDownload && m.bulk != nil {
+		if queueResult {
 			foreground := m.mode == modeBulkDownload || m.mode == modeBulkConfirm
 			if msg.err != nil {
 				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
@@ -751,7 +754,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resolvedDownloadMsg:
 		m.loading = false
 		if msg.err != nil {
-			if m.returnMode == modeBulkDownload && m.bulk != nil {
+			if queueResult {
 				m.bulk.finishCurrent(bulkFileFailed, "", msg.err.Error())
 				return m.startNextBulkItem()
 			}
@@ -761,7 +764,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		path := filepath.Join(m.downloadDir, msg.filename)
 		existingBytes, exists, err := existingFileSize(path)
 		if err != nil {
-			if m.returnMode == modeBulkDownload && m.bulk != nil {
+			if queueResult {
 				m.bulk.finishCurrent(bulkFileFailed, msg.filename, err.Error())
 				return m.startNextBulkItem()
 			}
@@ -1058,8 +1061,10 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 				cmd := m.refresh()
 				return m, cmd
 			}
-			m.loading = true
 			cmd := m.pollDownload()
+			if cmd != nil {
+				m.loading = true
+			}
 			return m, cmd
 		default:
 			m.loading = true
@@ -1772,8 +1777,8 @@ func (m Model) startNextBulkItem() (tea.Model, tea.Cmd) {
 		m.errText = ""
 		return m, nil
 	}
-	m.returnMode = modeBulkDownload
 	if foreground {
+		m.returnMode = modeBulkDownload
 		m.mode = modeBulkDownload
 	}
 	m.download = nil

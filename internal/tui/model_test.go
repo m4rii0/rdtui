@@ -602,6 +602,20 @@ func TestManagedDownloadStatusMsgMarksCompletion(t *testing.T) {
 	}
 }
 
+func TestTerminalDownloadRefreshDoesNotSetLoading(t *testing.T) {
+	for _, status := range []models.ManagedDownloadStatus{models.ManagedDownloadStatusComplete, models.ManagedDownloadStatusError} {
+		t.Run(string(status), func(t *testing.T) {
+			m := NewModel(nil, newTestRuntime(t))
+			m.mode = modeDownload
+			m.download = &models.ManagedDownload{GID: "done", Status: status}
+			updated, cmd := m.handleShortcutAction(actionRefresh)
+			if updated.(Model).loading || cmd != nil {
+				t.Fatal("terminal refresh left loading without work")
+			}
+		})
+	}
+}
+
 func TestDownloadPathMsgUpdatesStatus(t *testing.T) {
 	m := Model{runtime: newTestRuntime(t), mode: modeDownload, download: &models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 
@@ -1035,7 +1049,7 @@ func TestBulkQueueContinuesAfterFailure(t *testing.T) {
 	}
 	m.bulk.Current = 0
 
-	updated, cmd := m.Update(resolvedDownloadMsg{err: errors.New("resolve failed")})
+	updated, cmd := m.Update(currentSetupResult(m, resolvedDownloadMsg{err: errors.New("resolve failed")}))
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected command to start next queued file after failure")
@@ -1044,7 +1058,7 @@ func TestBulkQueueContinuesAfterFailure(t *testing.T) {
 		t.Fatalf("bulk items after failure = %+v current=%d", m.bulk.Items, m.bulk.Current)
 	}
 
-	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
+	updated, cmd = m.Update(currentSetupResult(m, managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}}))
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected status polling after managed download starts")
@@ -1192,7 +1206,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("bulk state = current %d items %+v", m.bulk.Current, m.bulk.Items)
 	}
 
-	updated, cmd = m.Update(resolvedDownloadMsg{url: "https://example.com/b", filename: "b.mkv", filesize: 100})
+	updated, cmd = m.Update(currentSetupResult(m, resolvedDownloadMsg{url: "https://example.com/b", filename: "b.mkv", filesize: 100}))
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected command to start resolved background bulk item")
@@ -1201,7 +1215,7 @@ func TestBulkDownloadEscapeReturnsToMainWhileQueueRuns(t *testing.T) {
 		t.Fatalf("mode = %q, want resolved background item to preserve modeMain", m.mode)
 	}
 
-	updated, cmd = m.Update(managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}})
+	updated, cmd = m.Update(currentSetupResult(m, managedDownloadMsg{result: models.ManagedDownloadStart{Download: models.ManagedDownload{GID: "gid-2", Filename: "b.mkv", Status: models.ManagedDownloadStatusActive}}}))
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected polling command after background managed download starts")

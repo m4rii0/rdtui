@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +28,10 @@ type asyncService struct {
 
 func currentDownloadResult(m Model, download models.ManagedDownload, err error) managedDownloadStatusMsg {
 	return managedDownloadStatusMsg{request: downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}, queue: m.queueIdentity(), ok: true, download: download, err: err}
+}
+
+func currentSetupResult(m Model, msg tea.Msg) featureResultMsg {
+	return featureResultMsg{feature: setupFeature, request: requestID{m.setup.Generation}, queue: m.queueIdentity(), msg: msg}
 }
 
 func (*asyncService) Config() config.Config { return config.Config{} }
@@ -395,5 +401,115 @@ func TestNewTargetPickerCancelsPreviousSetup(t *testing.T) {
 	m = updated.(Model)
 	if next != nil || m.mode != modeChooseTarget || m.pendingDownload != nil {
 		t.Fatal("old setup displaced new target picker")
+	}
+}
+
+type queueSetupService struct {
+	app.AppService
+	stage      string
+	entered    chan struct{}
+	release    chan struct{}
+	resolveErr error
+	startErr   error
+	terminal   bool
+}
+
+func (s *queueSetupService) wait(ctx context.Context, stage string) {
+	if s.stage != stage {
+		return
+	}
+	close(s.entered)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+	}
+}
+
+func (s *queueSetupService) ResolveDirectURL(ctx context.Context, _ models.DownloadTarget) (models.UnrestrictedLink, error) {
+	s.wait(ctx, "resolve")
+	return models.UnrestrictedLink{Download: "https://example.com/a", Filename: "a.mkv"}, s.resolveErr
+}
+
+func (s *queueSetupService) Start(ctx context.Context, _, _ string) (app.DownloadStart, error) {
+	s.wait(ctx, "start")
+	status := models.ManagedDownloadStatusActive
+	if s.terminal {
+		status = models.ManagedDownloadStatusComplete
+	}
+	return app.DownloadStart{Snapshot: app.DownloadSnapshot{Ref: app.DownloadRef{Generation: 8, GID: "a"}, Download: models.ManagedDownload{GID: "a", Filename: "a.mkv", Status: status}}}, s.startErr
+}
+
+func TestQueueSetupResultsSurviveNavigation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stage     string
+		failed    bool
+		statError bool
+		terminal  bool
+	}{
+		{name: "resolution-success", stage: "resolve"},
+		{name: "resolution-error", stage: "resolve", failed: true},
+		{name: "path-error", stage: "resolve", statError: true, failed: true},
+		{name: "start-success", stage: "start"},
+		{name: "start-error", stage: "start", failed: true},
+		{name: "start-terminal", stage: "start", terminal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &queueSetupService{stage: tc.stage, entered: make(chan struct{}), release: make(chan struct{}), terminal: tc.terminal}
+			if tc.failed && !tc.statError {
+				if tc.stage == "resolve" {
+					s.resolveErr = errors.New("resolve failed")
+				} else {
+					s.startErr = errors.New("start failed")
+				}
+			}
+			m := asyncQueue(t)
+			m.service, m.download, m.queueGeneration = s, nil, 7
+			m.downloadDir = t.TempDir()
+			if tc.statError {
+				m.downloadDir = filepath.Join(m.downloadDir, "not-a-directory")
+				if err := os.WriteFile(m.downloadDir, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var cmd tea.Cmd
+			if tc.stage == "resolve" {
+				cmd = m.resolveDownload(models.DownloadTarget{Link: "https://example.com/a"})
+			} else {
+				updated, start := m.startPendingDownload("https://example.com/a", "a.mkv")
+				m, cmd = updated.(Model), start
+			}
+			done := make(chan tea.Msg, 1)
+			go func() { done <- cmd() }()
+			<-s.entered
+			updated, _ := m.handleShortcutAction(actionBack)
+			m = updated.(Model)
+			updated, _ = m.handleShortcutAction(actionOpenImport)
+			m = updated.(Model)
+			close(s.release)
+			updated, next := m.Update(<-done)
+			m = updated.(Model)
+			if !tc.failed && !tc.terminal && tc.stage == "resolve" {
+				if next == nil {
+					t.Fatal("resolution did not schedule start")
+				}
+				updated, next = m.Update(next())
+				m = updated.(Model)
+			}
+			if m.mode != modeFileBrowser || m.returnMode != modeMain {
+				t.Fatalf("queue result displaced browser navigation: mode=%s return=%s", m.mode, m.returnMode)
+			}
+			if tc.failed || tc.terminal {
+				want := bulkFileFailed
+				if tc.terminal {
+					want = bulkFileSuccess
+				}
+				if m.bulk.Current != 1 || m.bulk.Items[0].Status != want || m.bulk.Items[1].Status != bulkFileActive || next == nil {
+					t.Fatalf("queue result was not routed to its item: current=%d items=%+v", m.bulk.Current, m.bulk.Items)
+				}
+			} else if m.bulk.Current != 0 || m.download == nil || m.downloadRef != (app.DownloadRef{Generation: 8, GID: "a"}) || next == nil {
+				t.Fatal("queue start did not install and poll its active download")
+			}
+		})
 	}
 }
