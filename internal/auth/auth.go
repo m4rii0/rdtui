@@ -92,6 +92,14 @@ func (m *Manager) CompleteDeviceFlow(ctx context.Context, code models.DeviceCode
 		return nil, err
 	}
 	m.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	if err := m.deps.Root.Err(); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
 	// Replacement and saving share the same boundary as a refresh commit. The
 	// new credentials remain pending even when their first save fails.
 	m.replaceLocked()

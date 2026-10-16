@@ -456,6 +456,61 @@ func TestInteractiveDeviceCredentialsPendingSave(t *testing.T) {
 	}
 }
 
+func TestInteractiveDeviceCanceledCompletionCannotCommit(t *testing.T) {
+	for _, cause := range []string{"caller replaced by new session", "root shutdown"} {
+		t.Run(cause, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &sessionStore{}
+				entered := make(chan struct{})
+				release := make(chan struct{})
+				oauth := &sessionOAuth{exchange: func(context.Context, string, string, string) (models.DeviceCredentials, error) {
+					close(entered)
+					<-release // Model a successful OAuth result arriving after cancellation.
+					return deviceCredentials(time.Now(), time.Hour), nil
+				}}
+				deps := sessionDependencies(t, store, oauth)
+				root, shutdown := context.WithCancel(deps.Root)
+				defer shutdown()
+				deps.Root = root
+				m := NewManager(deps)
+				if _, err := m.AuthenticateWithToken(t.Context(), "existing-user", false); err != nil {
+					t.Fatal(err)
+				}
+				caller, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				done := make(chan error, 1)
+				go func() {
+					_, err := m.CompleteDeviceFlow(caller, models.DeviceCode{DeviceCode: "canceled-code"})
+					done <- err
+				}()
+				<-entered
+				wantUser := "existing-user"
+				if cause == "root shutdown" {
+					shutdown()
+				} else {
+					cancel()
+					if _, err := m.AuthenticateWithToken(t.Context(), "new-user", false); err != nil {
+						t.Fatal(err)
+					}
+					wantUser = "new-user"
+				}
+				close(release)
+				if err := <-done; !errors.Is(err, context.Canceled) {
+					t.Errorf("completion error = %v, want cancellation", err)
+				}
+				if snapshot := m.Snapshot(); snapshot.Method != models.AuthMethodToken || snapshot.User.Username != wantUser {
+					t.Errorf("canceled completion overwrote active session: %+v", snapshot)
+				}
+				store.mu.Lock()
+				defer store.mu.Unlock()
+				if store.saves != 0 || store.creds != nil {
+					t.Errorf("canceled completion persisted credentials: %d saves", store.saves)
+				}
+			})
+		})
+	}
+}
+
 func TestMissingCredentialsDifferFromCorruptOrUnreadable(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
