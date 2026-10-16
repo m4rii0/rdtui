@@ -412,6 +412,7 @@ type queueSetupService struct {
 	resolveErr error
 	startErr   error
 	terminal   bool
+	startCalls atomic.Int32
 }
 
 func (s *queueSetupService) wait(ctx context.Context, stage string) {
@@ -431,6 +432,7 @@ func (s *queueSetupService) ResolveDirectURL(ctx context.Context, _ models.Downl
 }
 
 func (s *queueSetupService) Start(ctx context.Context, _, _ string) (app.DownloadStart, error) {
+	s.startCalls.Add(1)
 	s.wait(ctx, "start")
 	status := models.ManagedDownloadStatusActive
 	if s.terminal {
@@ -509,6 +511,76 @@ func TestQueueSetupResultsSurviveNavigation(t *testing.T) {
 				}
 			} else if m.bulk.Current != 0 || m.download == nil || m.downloadRef != (app.DownloadRef{Generation: 8, GID: "a"}) || next == nil {
 				t.Fatal("queue start did not install and poll its active download")
+			}
+		})
+	}
+}
+
+func queueOverwriteAfterNavigation(t *testing.T) (Model, *queueSetupService) {
+	t.Helper()
+	s := &queueSetupService{}
+	m := asyncQueue(t)
+	m.service, m.queueGeneration = s, 7
+	m.downloadDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(m.downloadDir, "a.mkv"), []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.handleShortcutAction(actionBack)
+	m = updated.(Model)
+	updated, _ = m.handleShortcutAction(actionOpenImport)
+	m = updated.(Model)
+	updated, resolve := m.Update(currentDownloadResult(m, models.ManagedDownload{GID: "a", Status: models.ManagedDownloadStatusComplete}, nil))
+	m = updated.(Model)
+	if resolve == nil || m.bulk.Current != 1 {
+		t.Fatal("queue did not advance in background")
+	}
+	updated, cmd := m.Update(resolve())
+	m = updated.(Model)
+	if cmd != nil || m.mode != modeOverwrite || m.pendingDownload == nil || s.startCalls.Load() != 0 {
+		t.Fatal("existing file was not held for confirmation")
+	}
+	return m, s
+}
+
+func TestQueueOverwriteRestoresNavigation(t *testing.T) {
+	for _, action := range []string{"skip", "confirm"} {
+		t.Run(action, func(t *testing.T) {
+			m, service := queueOverwriteAfterNavigation(t)
+			key := tea.KeyEscape
+			if action == "confirm" {
+				key = tea.KeyEnter
+			}
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: key})
+			m = updated.(Model)
+			if m.mode != modeFileBrowser || m.returnMode != modeMain || m.pendingDownload != nil || cmd == nil {
+				t.Fatalf("overwrite did not restore browser and continue queue: mode=%s return=%s current=%d", m.mode, m.returnMode, m.bulk.Current)
+			}
+			if action == "skip" {
+				if m.bulk.Current != 2 || m.bulk.Items[1].Status != bulkFileSkipped || m.bulk.Items[2].Status != bulkFileActive || service.startCalls.Load() != 0 {
+					t.Fatal("overwrite skip did not advance exactly one item without starting it")
+				}
+			} else {
+				updated, poll := m.Update(cmd())
+				m = updated.(Model)
+				if m.mode != modeFileBrowser || m.returnMode != modeMain || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive || m.downloadRef != (app.DownloadRef{Generation: 8, GID: "a"}) || service.startCalls.Load() != 1 || poll == nil {
+					t.Fatal("confirmed overwrite lost queue ownership or foreground navigation")
+				}
+			}
+		})
+	}
+}
+
+func TestStaleQueueOverwriteDoesNotAffectReplacement(t *testing.T) {
+	for _, key := range []rune{tea.KeyEscape, tea.KeyEnter} {
+		t.Run(tea.KeyPressMsg{Code: key}.String(), func(t *testing.T) {
+			m, service := queueOverwriteAfterNavigation(t)
+			m.queueGeneration++
+			_ = m.resolveDownload(models.DownloadTarget{Link: "replacement"})
+			replacementContext, replacementGeneration := m.setup.ctx, m.setup.Generation
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: key})
+			m = updated.(Model)
+			if cmd != nil || m.mode != modeFileBrowser || m.returnMode != modeMain || m.pendingDownload != nil || m.bulk.Current != 1 || m.bulk.Items[1].Status != bulkFileActive || service.startCalls.Load() != 0 || replacementContext.Err() != nil || m.setup.Generation != replacementGeneration {
+				t.Fatal("obsolete overwrite prompt affected replacement queue or navigation")
 			}
 		})
 	}

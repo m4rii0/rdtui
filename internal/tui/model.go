@@ -157,6 +157,8 @@ type Model struct {
 }
 
 type pendingDownloadState struct {
+	Queue         *queueIdentity
+	ResumeMode    mode
 	URL           string
 	Filename      string
 	Path          string
@@ -773,11 +775,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if exists {
 			m.pendingDownload = &pendingDownloadState{
+				ResumeMode:    m.mode,
 				URL:           msg.url,
 				Filename:      msg.filename,
 				Path:          path,
 				RemoteBytes:   msg.filesize,
 				ExistingBytes: existingBytes,
+			}
+			if queueResult {
+				m.pendingDownload.Queue = new(m.queueIdentity())
 			}
 			m.mode = modeOverwrite
 			m.errText = ""
@@ -1515,20 +1521,20 @@ func (m Model) handlePopupCancel() (tea.Model, tea.Cmd) {
 		m.deleteIDs = nil
 		return m, nil
 	case modeOverwrite:
-		m.setup.invalidate()
-		if m.returnMode == modeBulkDownload && m.bulk != nil {
-			filename := ""
-			if m.pendingDownload != nil {
-				filename = m.pendingDownload.Filename
+		pending := m.pendingDownload
+		m.pendingDownload = nil
+		if pending != nil && pending.Queue != nil {
+			m.mode = pending.ResumeMode
+			if m.bulk == nil || !m.bulk.isRunning() || *pending.Queue != m.queueIdentity() {
+				return m, nil
 			}
-			m.pendingDownload = nil
-			m.bulk.finishCurrent(bulkFileSkipped, filename, "existing file skipped")
-			m.mode = modeBulkDownload
+			m.setup.invalidate()
+			m.bulk.finishCurrent(bulkFileSkipped, pending.Filename, "existing file skipped")
 			m.errText = ""
 			return m.startNextBulkItem()
 		}
+		m.setup.invalidate()
 		m.mode = m.returnMode
-		m.pendingDownload = nil
 		m.status = "Download cancelled"
 		m.errText = ""
 		return m, nil
@@ -1651,6 +1657,13 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 		if m.pendingDownload == nil {
 			m.mode = m.returnMode
 			return m, nil
+		}
+		if m.pendingDownload.Queue != nil {
+			m.mode = m.pendingDownload.ResumeMode
+			if m.bulk == nil || !m.bulk.isRunning() || *m.pendingDownload.Queue != m.queueIdentity() {
+				m.pendingDownload = nil
+				return m, nil
+			}
 		}
 		return m.startPendingDownload(m.pendingDownload.URL, m.pendingDownload.Filename)
 	case modeShowURL:
