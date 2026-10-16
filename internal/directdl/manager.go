@@ -11,17 +11,21 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 type Manager struct {
-	mu        sync.Mutex
-	client    *http.Client
-	downloads map[string]*downloadState
-	nextID    atomic.Uint64
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	mu              sync.Mutex
+	client          *http.Client
+	downloads       map[string]*downloadState
+	nextID          atomic.Uint64
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	closing         bool
+	done            chan struct{}
+	beforeAdmission func() // Unexported scheduling seam; nil outside tests.
 }
 
 type downloadState struct {
@@ -37,18 +41,26 @@ func NewManager() *Manager {
 		downloads: map[string]*downloadState{},
 		ctx:       ctx,
 		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 }
 
-func (m *Manager) SetBinaryPath(string) {}
-
-func (m *Manager) StartDownload(_ context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+func (m *Manager) StartDownload(transferCtx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+	if err := transferCtx.Err(); err != nil {
+		return models.ManagedDownload{}, err
+	}
+	m.mu.Lock()
+	closing := m.closing
+	m.mu.Unlock()
+	if closing {
+		return models.ManagedDownload{}, download.ErrClosed
+	}
 	if err := os.MkdirAll(req.Dir, 0o755); err != nil {
 		return models.ManagedDownload{}, fmt.Errorf("ensure download dir: %w", err)
 	}
 
 	gid := fmt.Sprintf("direct-%d", m.nextID.Add(1))
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(transferCtx)
 	state := &downloadState{
 		download: models.ManagedDownload{
 			GID:       gid,
@@ -61,12 +73,33 @@ func (m *Manager) StartDownload(_ context.Context, req models.ManagedDownloadReq
 		cancel: cancel,
 	}
 
+	if m.beforeAdmission != nil {
+		m.beforeAdmission()
+	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closing {
+		cancel()
+		return models.ManagedDownload{}, download.ErrClosed
+	}
+	if err := transferCtx.Err(); err != nil {
+		cancel()
+		return models.ManagedDownload{}, err
+	}
 	m.downloads[gid] = state
-	m.mu.Unlock()
-
+	workerDone := make(chan struct{})
+	// Registration shares the admission lock with the shutdown transition.
 	m.wg.Go(func() {
+		defer close(workerDone)
+		defer cancel()
 		m.runDownload(ctx, state)
+	})
+	m.wg.Go(func() {
+		select {
+		case <-m.ctx.Done():
+			cancel()
+		case <-workerDone:
+		}
 	})
 
 	return state.snapshot(), nil
@@ -83,16 +116,19 @@ func (m *Manager) DownloadStatus(_ context.Context, gid string) (models.ManagedD
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {
-	m.cancel()
-
-	done := make(chan struct{})
-	go func() {
-		m.wg.Wait()
-		close(done)
-	}()
+	m.mu.Lock()
+	if !m.closing {
+		m.closing = true
+		m.cancel()
+		go func() {
+			m.wg.Wait()
+			close(m.done)
+		}()
+	}
+	m.mu.Unlock()
 
 	select {
-	case <-done:
+	case <-m.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

@@ -17,20 +17,13 @@ import (
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
-type downloadManager interface {
-	SetBinaryPath(string)
-	StartDownload(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error)
-	DownloadStatus(context.Context, string) (models.ManagedDownload, error)
-	Shutdown(context.Context) error
-}
-
 type Service struct {
 	store          *config.Store
 	config         config.Config
 	auth           *auth.Manager
 	client         *realdebrid.Client
 	session        *models.AuthSession
-	downloader     downloadManager
+	downloader     download.Backend
 	activeDownload *models.ManagedDownload
 }
 
@@ -51,7 +44,7 @@ func New() (*Service, error) {
 	}, nil
 }
 
-func newDownloadManager(cfg config.Config) downloadManager {
+func newDownloadManager(cfg config.Config) download.Backend {
 	switch models.DownloadBackend(cfg.DownloadBackend) {
 	case models.DownloadBackendDirect:
 		return directdl.NewManager()

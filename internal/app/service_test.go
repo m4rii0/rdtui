@@ -140,8 +140,6 @@ type fakeDownloadManager struct {
 	downloadStatus func(context.Context, string) (models.ManagedDownload, error)
 }
 
-func (f *fakeDownloadManager) SetBinaryPath(string) {}
-
 func (f *fakeDownloadManager) StartDownload(ctx context.Context, req models.ManagedDownloadRequest) (models.ManagedDownload, error) {
 	f.startCalls++
 	if f.startDownload == nil {
