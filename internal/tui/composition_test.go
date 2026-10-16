@@ -108,16 +108,8 @@ func TestCompositionQueueRejectionIsConsumedBeforeReauthentication(t *testing.T)
 		t.Fatalf("historical failure was erased: %+v", outcome)
 	}
 
-	// A different newly failed item still reports a current rejection, even
-	// though the snapshot also retains the already acknowledged first failure.
-	snapshot.Items = slices.Clone(snapshot.Items)
-	snapshot.Items[1].Status = app.QueueItemTerminal
-	snapshot.Items[1].Outcome = &app.ItemOutcome{TorrentID: "b", Kind: app.OutcomeFailed, Err: auth.ErrNoValidCredentials}
-	snapshot.Finished = true
-	m, _ = updateQueue(m, snapshot)
-	if m.mode != modeAuthChoice || m.session != nil {
-		t.Fatal("fresh queue rejection was suppressed with historical failures")
-	}
+	// Unseen outcomes need the authoritative owner's state; the composed
+	// regression covers both pre-login failures and replacement rejection.
 }
 
 func TestCompositionStaleQueueRejectionIsNotConsumed(t *testing.T) {

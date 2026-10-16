@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -207,7 +208,7 @@ func (m *Manager) refreshDevice(ctx context.Context, generation uint64) error {
 		}
 		refreshed, err := m.deps.OAuth.RefreshToken(ctx, creds.ClientID, creds.ClientSecret, creds.RefreshToken)
 		if err != nil {
-			return fmt.Errorf("refresh device token: %w", err)
+			return m.deviceFailure(generation, fmt.Errorf("refresh device token: %w", err))
 		}
 		m.mu.Lock()
 		if m.generation != generation {
@@ -233,7 +234,7 @@ func (m *Manager) refreshDevice(ctx context.Context, generation uint64) error {
 	}
 	user, err := m.deps.Validate(ctx, creds.AccessToken)
 	if err != nil {
-		return err
+		return m.deviceFailure(generation, err)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -245,4 +246,19 @@ func (m *Manager) refreshDevice(ctx context.Context, generation uint64) error {
 	}
 	m.session = models.AuthSession{Method: models.AuthMethodDevice, Token: creds.AccessToken, User: user}
 	return nil
+}
+
+// OAuth and validation bypass the authenticated client's rejection handler.
+// Attribute their failures before changing state, just as with request tokens.
+func (m *Manager) deviceFailure(generation uint64, err error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation != generation {
+		return errSessionReplaced
+	}
+	if apiErr, ok := errors.AsType[*realdebrid.APIError](err); ok && apiErr.StatusCode == 401 {
+		m.replaceLocked()
+		return errors.Join(ErrNoValidCredentials, err)
+	}
+	return err
 }

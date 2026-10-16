@@ -1,14 +1,12 @@
 package config
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/m4rii0/rdtui/pkg/models"
 )
@@ -74,73 +72,77 @@ func TestExplicitTokenSaveUsesEnteredToken(t *testing.T) {
 	}
 }
 
+type gatedPreferenceStore struct {
+	mu      sync.Mutex
+	prefs   Config
+	saves   int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *gatedPreferenceStore) LoadPreferences() (Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prefs, nil
+}
+
+func (s *gatedPreferenceStore) SaveConfig(prefs Config) error {
+	s.mu.Lock()
+	s.saves++
+	first := s.saves == 1
+	s.mu.Unlock()
+	if first {
+		close(s.entered)
+		<-s.release
+	}
+	s.mu.Lock()
+	s.prefs = prefs
+	s.mu.Unlock()
+	return nil
+}
+
 func TestConcurrentPreferenceUpdatesPreserveBothChanges(t *testing.T) {
-	store := NewStoreAt(t.TempDir())
+	store := &gatedPreferenceStore{entered: make(chan struct{}), release: make(chan struct{})}
 	repo, err := NewRepository(store, Overrides{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	secondStarted := make(chan struct{})
-	done := make(chan error, 2)
-	var workers sync.WaitGroup
-	t.Cleanup(func() {
-		cancel()
-		finished := make(chan struct{})
-		go func() {
-			workers.Wait()
-			close(finished)
-		}()
-		cleanup, stop := context.WithTimeout(context.Background(), time.Second)
-		defer stop()
-		select {
-		case <-finished:
-		case <-cleanup.Done():
-			t.Error("preference update workers did not stop")
-		}
-	})
-	workers.Go(func() {
-		done <- repo.Update(func(prefs *Config) error {
-			close(entered)
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		firstDone <- repo.Update(func(prefs *Config) error {
 			prefs.Aria2BinaryPath = "/changed/aria2c"
 			return nil
 		})
-	})
-	select {
-	case <-entered:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	workers.Go(func() {
-		close(secondStarted)
-		done <- repo.Update(func(prefs *Config) error {
+	}()
+	<-store.entered
+	// Mutex waits are not durably blocked in testing/synctest. Probe the actual
+	// admission lock while the first save is gated, rather than merely observing
+	// a goroutine before Update. If serialization is removed, force the second
+	// commit to finish first, making the lost update deterministic too.
+	admission := make(chan bool)
+	go func() {
+		unserialized := repo.mu.TryLock()
+		if unserialized {
+			repo.mu.Unlock()
+		}
+		admission <- unserialized
+		secondDone <- repo.Update(func(prefs *Config) error {
 			prefs.DefaultDownloadDir = "/changed/downloads"
 			return nil
 		})
-	})
-	select {
-	case <-secondStarted:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	}()
+	unserialized := <-admission
+	var secondErr error
+	if unserialized {
+		secondErr = <-secondDone
 	}
-	close(release)
-	for range 2 {
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
+	close(store.release)
+	firstErr := <-firstDone
+	if !unserialized {
+		secondErr = <-secondDone
+	}
+	if firstErr != nil || secondErr != nil {
+		t.Fatalf("updates failed: %v, %v", firstErr, secondErr)
 	}
 	persisted, err := store.LoadPreferences()
 	if err != nil {

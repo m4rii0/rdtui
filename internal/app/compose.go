@@ -50,6 +50,10 @@ func NewApplication(ctx context.Context, options ApplicationOptions) (*Applicati
 	}
 	cfg := prefs.Effective()
 	runtime := NewRuntime(ctx)
+	desktop := options.Desktop
+	if desktop == nil {
+		desktop = download.NewSystemDesktop(runtime.Context())
+	}
 	backend, err := options.BackendFactory(runtime.Context(), cfg)
 	if err != nil {
 		runtime.Stop()
@@ -74,9 +78,9 @@ func NewApplication(ctx context.Context, options ApplicationOptions) (*Applicati
 		}))
 	a := &Application{
 		Runtime: runtime, Auth: &Authentication{manager: manager}, Config: prefs,
-		Torrents: NewTorrentService(client), Desktop: options.Desktop,
+		Torrents: NewTorrentService(client), Desktop: desktop,
 		Downloads: NewDownloadCoordinator(runtime.Context(), backend, cfg.DefaultDownloadDir),
-		Batches:   NewBatchService(client, options.Desktop, options.Wait),
+		Batches:   NewBatchService(client, desktop, options.Wait),
 	}
 	a.prepare = func(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
 		return PrepareDownload(ctx, target, cfg.DefaultDownloadDir,

@@ -19,8 +19,15 @@ type AuthService interface {
 	CompleteDeviceFlow(context.Context, models.DeviceCode) (*models.AuthSession, error)
 }
 
+// AuthState reads the session owner's current state, not the UI's older display
+// snapshot. It authorizes navigation on delayed request/queue failures.
+type AuthState interface {
+	Snapshot() models.AuthSession
+}
+
 type authModel struct {
 	authService AuthService
+	authState   AuthState
 	auth        asyncRequest
 	session     *models.AuthSession
 	deviceCode  *models.DeviceCode
@@ -81,6 +88,13 @@ func (a *authModel) update(m *Model, msg tea.Msg) tea.Cmd {
 			m.status = "Authenticated as " + msg.session.User.Username
 			m.errText = ""
 			return m.refresh()
+		}
+		if _, ok := errors.AsType[*auth.CredentialPersistenceError](msg.err); ok {
+			// Retain the flow identity: r/enter retries the manager's pending
+			// save, not browser authorization or another OAuth exchange.
+			m.errText = msg.err.Error()
+			m.status = "Retry saving credentials with r or enter"
+			return nil
 		}
 		if errors.Is(msg.err, realdebrid.ErrAuthorizationPending) {
 			if a.deviceCode != nil && time.Since(a.deviceCode.RequestedAt) < time.Duration(a.deviceCode.ExpiresIn)*time.Second {

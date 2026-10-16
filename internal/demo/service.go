@@ -45,7 +45,11 @@ func NewService(parent context.Context) *Service {
 // ---------------------------------------------------------------------------
 
 func (s *Service) Bootstrap(_ context.Context) (*models.AuthSession, error) {
-	return &models.AuthSession{
+	return new(s.Snapshot()), nil
+}
+
+func (s *Service) Snapshot() models.AuthSession {
+	return models.AuthSession{
 		Method: models.AuthMethodToken,
 		User: models.User{
 			ID:         1,
@@ -54,7 +58,7 @@ func (s *Service) Bootstrap(_ context.Context) (*models.AuthSession, error) {
 			Premium:    1,
 			Expiration: time.Now().Add(30 * 24 * time.Hour),
 		},
-	}, nil
+	}
 }
 
 func (s *Service) AuthenticateWithToken(_ context.Context, _ string, _ bool) (*models.AuthSession, error) {

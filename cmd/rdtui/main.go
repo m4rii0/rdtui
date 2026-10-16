@@ -69,6 +69,7 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 	if os.Getenv("RDTUI_DEMO") == "1" {
 		svc := demo.NewService(runtime.Context())
 		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc, svc, svc
+		deps.AuthState = svc
 		deps.Batches, deps.Bulk, deps.PrepareDownload = svc.NewBatches(), svc.NewBulkQueue(runtime), svc.PrepareDownload
 		closeService = svc.Close
 	} else {
@@ -93,7 +94,7 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 }
 
 func applicationDependencies(a *app.Application) tui.Dependencies {
-	return tui.Dependencies{Runtime: a.Runtime, Auth: a.Auth, Torrents: a.Torrents,
+	return tui.Dependencies{Runtime: a.Runtime, Auth: a.Auth, AuthState: a.Auth, Torrents: a.Torrents,
 		Downloads: a.Downloads, Batches: a.Batches, Bulk: a.Bulk, Desktop: a.Desktop,
 		PrepareDownload: a.PrepareDownload}
 }
@@ -120,7 +121,7 @@ func productionOptions() (app.ApplicationOptions, error) {
 				return nil
 			}
 		},
-		Stat: downloadFileSize, Desktop: systemDesktop{}, BackendFactory: productionBackend,
+		Stat: downloadFileSize, BackendFactory: productionBackend,
 	}, nil
 }
 
@@ -144,12 +145,6 @@ func downloadFileSize(path string) (int64, bool, error) {
 	}
 	return info.Size(), true, nil
 }
-
-type systemDesktop struct{}
-
-func (systemDesktop) CopyURL(url string) (bool, error)    { return download.CopyURL(url) }
-func (systemDesktop) OpenFile(path string) error          { return download.OpenFile(path) }
-func (systemDesktop) RevealInDirectory(path string) error { return download.RevealInDirectory(path) }
 
 func cleanupRuntime(runtime *app.Runtime, closeService func(context.Context) error) error {
 	runtime.Stop()

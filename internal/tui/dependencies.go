@@ -10,6 +10,7 @@ import (
 // Dependencies exposes workflows, not persistence or application shutdown.
 type Dependencies struct {
 	Auth            AuthService
+	AuthState       AuthState
 	Torrents        TorrentService
 	Downloads       DownloadService
 	Batches         BatchService

@@ -7,9 +7,10 @@ and pending credentials exist only for the lifetime of one process.
 
 `cmd/rdtui/main.go` owns signals, process inputs, concrete adapters, Bubble Tea,
 and cleanup. `productionOptions` captures environment overrides and supplies the
-HTTP client, clock, cancelable wait, file inspection, desktop adapter, and backend
+HTTP client, clock, cancelable wait, file inspection, and backend
 factory to `app.NewApplication`. `applicationDependencies` exposes only the
-feature contracts to the TUI.
+feature contracts to the TUI. `NewApplication` binds the default system desktop
+adapter to its runtime root; an explicitly injected desktop remains supported.
 
 ```text
 cmd/rdtui
@@ -27,7 +28,7 @@ cmd/rdtui
 `internal/app`, `internal/auth`, and `internal/config` do not depend on the TUI,
 Bubble Tea, or Lip Gloss. Application consumers own small adapter interfaces such
 as `TorrentAPI`, `BatchAPI`, `Desktop`, and `auth.CredentialStore`. The TUI owns
-`AuthService`, `TorrentService`, `DownloadService`, `BatchService`,
+`AuthService`, `AuthState`, `TorrentService`, `DownloadService`, `BatchService`,
 `BulkQueueService`, and `DesktopService` at their feature boundaries. There is no
 second application facade owning a client, session, or active download.
 
@@ -62,6 +63,21 @@ workers. Errors are joined and reported, including an expired cleanup deadline.
 Repeated closes wait on the same eventual completion; a timed-out caller does not
 reopen admission or abandon cleanup. Do not use the canceled root context as the
 cleanup context.
+
+The `Desktop` consumer interface remains context-free. Its production
+`download.SystemDesktop` adapter uses the application root and a **5-second cap
+per call**, shared across clipboard fallback candidates. Root cancellation stops
+the helper immediately; otherwise the cap keeps a stalled clipboard/open/reveal
+operation finite even when its caller cannot propagate cancellation through the
+port. `exec.CommandContext.Run` kills and waits for the owned helper PID, not a
+process group; intentionally launched application descendants are not killed or
+waited for. macOS `open` does not use `-W`; Windows reveal uses `cmd /c start` so
+Explorer itself is not the owned helper. A **100ms `WaitDelay`** bounds inherited
+pipe-copy waits after helper exit/cancellation. These bounds do not enlarge the
+2-second shutdown budget. Unusually slow helpers can time out and need manual
+retry; native launcher/clipboard behavior still needs platform testing. Legacy
+download helper functions retain their signatures and the same finite cap;
+`Context` variants additionally accept cancellation.
 
 The coordinator's autonomous backend shutdown uses an independent deadline of
 at most two seconds, shortened by an earlier root deadline or the initiating
@@ -152,6 +168,7 @@ failed, skipped, and canceled torrents remain unselected unless explicitly toggl
 | Batch delete, copy, file-selection submissions | Cancelable 250-millisecond inter-request delay |
 | Device token refresh | Missing token or expiry within 1 minute (inclusive) |
 | Shared credential refresh | Application lifetime, capped at 30 seconds |
+| Desktop helper call | Application root, capped at 5 seconds; 100ms pipe-drain bound |
 | Default exit cleanup / internal queue stop | 2 seconds, not a new budget per shutdown stage |
 
 Clock, delay, HTTP transport, backend, filesystem inspection, credential storage,
@@ -181,6 +198,10 @@ This applies to both refresh and interactive device auth. Intentional session
 replacement discards the old generation's pending state. Pending state is not
 durable: after exit reauthentication may be needed. Do not silently reuse the old
 refresh token or treat an unsaved session as authenticated.
+The device-auth screen retains its code on a typed persistence failure and shows
+the error; existing **r / enter** retries the pending save without new browser
+authorization. Escape still leaves that flow; intentionally authorizing a new
+session replaces its pending state.
 
 Missing `auth.json` means no stored credentials. Malformed JSON, permissions, and
 other I/O errors remain distinguishable through `CredentialLoadError`.
@@ -189,6 +210,15 @@ Unauthenticated operations match `auth.ErrNoValidCredentials`. Structured
 Confirmed credential rejection is attributed to the exact token sent: a late
 old-token rejection cannot invalidate a newer session. Mutations are not replayed
 after rejection or ambiguous transport errors.
+Refresh-exchange and token-validation 401s follow the same rule, checked against
+their session generation before invalidating state. Their structured API cause
+is joined with the authentication-required sentinel; rate-limit, transport, and
+storage errors are not reclassified. Before redirecting on delayed auth errors,
+the TUI reads the credential owner's current `AuthState.Snapshot().Method` (not
+its own older display session). Thus unseen historical queue failures survive
+for rendering without rejecting a successful replacement session. A real
+rejection that clears the owner's current session remains actionable. Both real
+and demo composition supply this narrow read-only contract.
 
 ## Configuration provenance and atomic replacement
 

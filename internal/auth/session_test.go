@@ -589,3 +589,91 @@ func TestRejectOldTokenPreservesNewSession(t *testing.T) {
 		t.Fatalf("rejected token available: %q %v", token, err)
 	}
 }
+
+func TestRefreshCredentialRejection(t *testing.T) {
+	for _, stage := range []string{"refresh", "validation"} {
+		for _, cause := range []error{
+			&realdebrid.APIError{StatusCode: 401, Code: 8, Message: "bad token"},
+			&realdebrid.APIError{StatusCode: 429, Code: 34, Message: "rate limited"},
+			errors.New("transport failed"),
+		} {
+			t.Run(stage+"/"+cause.Error(), func(t *testing.T) {
+				now := time.Now()
+				creds := deviceCredentials(now, time.Hour)
+				oauth := &sessionOAuth{refresh: func(context.Context, string, string, string) (models.DeviceCredentials, error) {
+					if stage == "refresh" {
+						return models.DeviceCredentials{}, cause
+					}
+					rotated := deviceCredentials(now, time.Hour)
+					rotated.AccessToken = "rotated"
+					return rotated, nil
+				}}
+				deps := sessionDependencies(t, &sessionStore{creds: &creds}, oauth)
+				deps.Now = func() time.Time { return now }
+				deps.Validate = func(_ context.Context, token string) (models.User, error) {
+					if token == "rotated" {
+						return models.User{}, cause
+					}
+					return models.User{Username: "device"}, nil
+				}
+				manager := NewManager(deps)
+				if _, err := manager.Bootstrap(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				now = now.Add(time.Hour)
+				_, err := manager.Token(t.Context())
+				apiErr, structured := errors.AsType[*realdebrid.APIError](cause)
+				rejected := structured && apiErr.StatusCode == 401
+				if !errors.Is(err, cause) || errors.Is(err, ErrNoValidCredentials) != rejected {
+					t.Fatalf("classification/cause lost: %v", err)
+				}
+				if (manager.Snapshot().Method == models.AuthMethodNone) != rejected {
+					t.Fatalf("incorrect auth state: %+v", manager.Snapshot())
+				}
+			})
+		}
+	}
+}
+
+func TestOldRefreshRejectionPreservesReplacement(t *testing.T) {
+	for _, stage := range []string{"refresh", "validation"} {
+		t.Run(stage, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				creds := deviceCredentials(time.Now(), -time.Second)
+				entered, release := make(chan struct{}), make(chan struct{})
+				reject := func() error {
+					close(entered)
+					<-release
+					return &realdebrid.APIError{StatusCode: 401, Code: 8}
+				}
+				oauth := &sessionOAuth{refresh: func(context.Context, string, string, string) (models.DeviceCredentials, error) {
+					if stage == "refresh" {
+						return models.DeviceCredentials{}, reject()
+					}
+					return deviceCredentials(time.Now(), time.Hour), nil
+				}}
+				deps := sessionDependencies(t, &sessionStore{creds: &creds}, oauth)
+				deps.Validate = func(_ context.Context, token string) (models.User, error) {
+					if token == "device" {
+						return models.User{}, reject()
+					}
+					return models.User{Username: token}, nil
+				}
+				manager := NewManager(deps)
+				done := make(chan error, 1)
+				go func() { _, err := manager.Bootstrap(t.Context()); done <- err }()
+				<-entered
+				if _, err := manager.AuthenticateWithToken(t.Context(), "replacement", false); err != nil {
+					t.Fatal(err)
+				}
+				close(release)
+				if err := <-done; err != nil {
+					t.Fatalf("old rejection escaped replacement: %v", err)
+				}
+				if token, err := manager.Token(t.Context()); err != nil || token != "replacement" {
+					t.Fatalf("replacement invalidated: %q %v", token, err)
+				}
+			})
+		})
+	}
+}

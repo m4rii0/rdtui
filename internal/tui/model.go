@@ -239,6 +239,7 @@ func NewModel(deps Dependencies) Model {
 	)
 	return Model{
 		authService:     deps.Auth,
+		authState:       deps.AuthState,
 		torrentService:  deps.Torrents,
 		downloads:       deps.Downloads,
 		batches:         deps.Batches,
@@ -405,6 +406,12 @@ func (m Model) authenticationRequired(msg tea.Msg) error {
 		err = errors.Join(err, item.Err)
 	}
 	if errors.Is(err, auth.ErrNoValidCredentials) {
+		// Application-owned queues may finish unseen items while login is in
+		// progress. Their immutable errors cannot reject a session installed
+		// since then; ask the credential owner, never the old UI snapshot.
+		if m.authState != nil && m.authState.Snapshot().Method != models.AuthMethodNone {
+			return nil
+		}
 		return err
 	}
 	return nil
