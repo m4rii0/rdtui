@@ -33,7 +33,7 @@ All code, opinions, design decisions, and documentation in this repository are m
 
 ## Requirements
 
-- Go 1.26+
+- Go 1.27.2+
 - A Real-Debrid account
 - `aria2c` installed on `PATH` only if you want to use the optional `aria2` download backend
 
