@@ -110,21 +110,10 @@ func (s *Service) AddTorrentURL(ctx context.Context, remoteURL string) (models.A
 }
 
 func (s *Service) ImportTorrentFiles(ctx context.Context, paths []string) []models.ImportResult {
-	results := make([]models.ImportResult, 0, len(paths))
-	for _, path := range paths {
-		res := models.ImportResult{Source: path}
-		if err := ctx.Err(); err != nil {
-			res.Err = err
-			results = append(results, res)
-			continue
-		}
-		added, err := s.client.AddTorrentPath(ctx, path)
-		if err != nil {
-			res.Err = err
-		} else {
-			res.TorrentID = added.ID
-		}
-		results = append(results, res)
+	batch := NewBatchService(s.client, s, nil).Import(ctx, paths)
+	results := make([]models.ImportResult, 0, len(batch.Items))
+	for _, item := range batch.Items {
+		results = append(results, models.ImportResult{Source: item.Source, TorrentID: item.TorrentCreatedID, Err: item.Err})
 	}
 	return results
 }

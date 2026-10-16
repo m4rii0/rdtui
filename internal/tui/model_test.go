@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -246,13 +247,16 @@ func TestImportFocusesNewTorrentAfterRefresh(t *testing.T) {
 		selectedIdx: 0,
 	}
 
-	updated, cmd := m.Update(importMsg{results: []models.ImportResult{{Source: "movie.torrent", TorrentID: "new"}}})
+	updated, cmd := m.Update(importMsg{result: app.BatchResult{Items: []app.ItemOutcome{{Source: "movie.torrent", TorrentCreatedID: "new", Kind: app.OutcomeSuccess}, {Source: "bad.torrent", Kind: app.OutcomeFailed, Err: errors.New("denied")}}}})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected refresh command after importing torrent")
 	}
 	if m.pendingFocusID != "new" {
 		t.Fatalf("pendingFocusID = %q, want new", m.pendingFocusID)
+	}
+	if !strings.Contains(m.status, "1 failed") || !strings.Contains(m.errText, "bad.torrent") {
+		t.Fatalf("status=%q err=%q", m.status, m.errText)
 	}
 
 	updated, _ = m.Update(torrentsMsg{torrents: []models.Torrent{
@@ -1404,6 +1408,108 @@ func TestBulkSelectFilesSubmitsSequentiallyAndReportsPartialFailure(t *testing.T
 	}
 	if !strings.Contains(m.errText, "beta: denied") {
 		t.Fatalf("errText = %q, want failed torrent detail", m.errText)
+	}
+}
+
+// Counting torrents as URLs or following list order rather than confirmed IDs
+// must not misreport a partially resolved torrent.
+func TestBatchCopyRendersExactUnits(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(fmt.Sprint(available), func(t *testing.T) {
+			service := &batchCopyTestService{available: available}
+			runtime := newTestRuntime(t)
+			ids := []string{"b", "a"}
+			torrents := []models.Torrent{{ID: "a", Status: "downloaded", Links: []string{"bad"}}, {ID: "b", Status: "downloaded", Links: []string{"one", "two", "bad"}}}
+			cmd := batchOpCmd(t.Context(), runtime, service, batchOpCopy, ids, torrents)
+			ids[0] = "changed"
+			torrents[1].Links[0] = "changed"
+			result := cmd().(batchResultMsg)
+			if len(result.items) != 4 || result.items[2].TargetIndex != 2 || result.items[3].TargetIndex != 0 {
+				t.Fatal(result.items)
+			}
+			if !slices.Equal(service.links, []string{"one", "two", "bad", "bad"}) || service.copied != "url\nurl" {
+				t.Fatalf("links=%v copied=%q", service.links, service.copied)
+			}
+			m := Model{mode: modeMain}
+			updated, _ := m.Update(result)
+			m = updated.(Model)
+			want := "Copied 2 URL(s)"
+			if !available {
+				want = "Resolved 2 URL(s), copied 0"
+			}
+			if !strings.Contains(m.flash.message, want) || !strings.Contains(m.flash.message, "1 partial torrent(s)") || !strings.Contains(m.flash.message, "1 failed torrent(s)") {
+				t.Fatalf("flash=%q err=%q", m.flash.message, m.errText)
+			}
+			if !available && !strings.Contains(m.errText, "clipboard not available") {
+				t.Fatal(m.errText)
+			}
+		})
+	}
+}
+
+type batchCopyTestService struct {
+	app.AppService
+	available bool
+	links     []string
+	copied    string
+}
+
+func (s *batchCopyTestService) ResolveDirectURL(_ context.Context, target models.DownloadTarget) (models.UnrestrictedLink, error) {
+	s.links = append(s.links, target.Link)
+	if target.Link == "bad" {
+		return models.UnrestrictedLink{}, errors.New("bad link")
+	}
+	return models.UnrestrictedLink{Download: "url"}, nil
+}
+func (s *batchCopyTestService) CopyURL(url string) (bool, error) {
+	s.copied = url
+	return s.available, nil
+}
+
+func TestImportCommandPreservesPartialResultsAndInput(t *testing.T) {
+	service := &batchImportTestService{}
+	runtime := newTestRuntime(t)
+	paths := []string{"bad.torrent", "good.torrent", "good.torrent"}
+	cmd := importCmd(t.Context(), runtime, service, paths)
+	paths[1] = "changed"
+	msg := cmd().(importMsg)
+	if !slices.Equal(service.paths, []string{"bad.torrent", "good.torrent", "good.torrent"}) || len(msg.result.Items) != 3 || msg.result.Items[0].Kind != app.OutcomeFailed || msg.result.Items[2].TorrentCreatedID != "new" {
+		t.Fatalf("paths=%v result=%+v", service.paths, msg.result)
+	}
+	m := Model{runtime: runtime}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+	if m.pendingFocusID != "new" || !strings.Contains(m.status, "Imported 2 torrent file(s), 1 failed") || !strings.Contains(m.errText, "bad.torrent") {
+		t.Fatalf("focus=%q status=%q err=%q", m.pendingFocusID, m.status, m.errText)
+	}
+}
+
+type batchImportTestService struct {
+	app.AppService
+	paths []string
+}
+
+func (s *batchImportTestService) ImportTorrentFiles(_ context.Context, paths []string) []models.ImportResult {
+	s.paths = append(s.paths, paths...)
+	var results []models.ImportResult
+	for _, path := range paths {
+		result := models.ImportResult{Source: path, TorrentID: "new"}
+		if path == "bad.torrent" {
+			result.Err = errors.New("denied")
+			result.TorrentID = ""
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+func TestBatchCancellationRendersCompletedUnits(t *testing.T) {
+	batch := app.BatchResult{Items: []app.ItemOutcome{{TorrentID: "a", Kind: app.OutcomeSuccess}, {TorrentID: "b", Kind: app.OutcomeCanceled, Err: context.Canceled, RemoteOutcomeUnknown: true}, {TorrentID: "c", Kind: app.OutcomeCanceled, Err: context.Canceled}}, Err: context.Canceled}
+	m := Model{runtime: newTestRuntime(t)}
+	updated, _ := m.Update(batchMessage(batchOpDelete, batch))
+	m = updated.(Model)
+	if !strings.Contains(m.flash.message, "Deleted 1/3 torrent(s), 2 canceled") || !strings.Contains(m.errText, "Remote outcome unknown") {
+		t.Fatalf("flash=%q err=%q", m.flash.message, m.errText)
 	}
 }
 

@@ -76,13 +76,18 @@ const (
 )
 
 type batchResultMsg struct {
-	op      batchOp
-	total   int
-	success int
-	failed  int
-	skipped int
-	detail  string
-	err     error
+	op       batchOp
+	total    int
+	success  int
+	failed   int
+	skipped  int
+	partial  int
+	canceled int
+	resolved int
+	copied   int
+	items    []app.ItemOutcome
+	detail   string
+	err      error
 }
 
 type selectFilesState struct {
@@ -210,7 +215,7 @@ type addTorrentMsg struct {
 }
 
 type importMsg struct {
-	results []models.ImportResult
+	result app.BatchResult
 }
 
 type selectFilesMsg struct {
@@ -524,14 +529,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeMain
 		success := 0
 		failed := 0
+		canceled := 0
 		failedNames := []string{}
 		focusID := ""
-		for _, result := range msg.results {
-			if result.OK() {
+		for _, result := range msg.result.Items {
+			if result.Kind == app.OutcomeSuccess {
 				success++
 				if focusID == "" {
-					focusID = result.TorrentID
+					focusID = result.TorrentCreatedID
 				}
+			} else if result.Kind == app.OutcomeCanceled {
+				canceled++
 			} else {
 				failed++
 				failedNames = append(failedNames, filepathBase(result.Source))
@@ -546,6 +554,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = fmt.Sprintf("Imported %d torrent file(s), %d failed", success, failed)
 			m.errText = "Failed: " + strings.Join(failedNames, ", ")
+		}
+		if canceled > 0 {
+			m.status += fmt.Sprintf(", %d canceled", canceled)
+			m.errText = strings.TrimSpace(m.errText + "\n" + fmt.Sprint(msg.result.Err))
+			for _, item := range msg.result.Items {
+				if item.RemoteOutcomeUnknown {
+					m.errText += "\nRemote outcome unknown; not replayed"
+					break
+				}
+			}
 		}
 		cmd := m.refresh()
 		return m, cmd
@@ -580,22 +598,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bulkFileSelectionResultMsg:
 		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
 		m.mode = modeMain
 		m.bulkSelect = nil
 		m.clearBatchSelection()
 		m.batchMode = false
 		flashMsg := "Bulk file selection complete: " + bulkFileSelectionSummaryLine(msg.success, msg.failed, msg.skipped)
+		if msg.canceled > 0 {
+			flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
+		}
 		if msg.detail != "" {
 			m.errText = strings.TrimSpace(msg.detail)
 		} else {
 			m.errText = ""
 		}
 		level := flashSuccess
-		if msg.failed > 0 {
+		if msg.failed > 0 || msg.canceled > 0 {
 			level = flashWarn
 		}
 		cmd := m.refresh()
@@ -620,16 +637,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		switch msg.op {
 		case batchOpDelete:
-			if msg.err != nil {
-				m.errText = msg.err.Error()
-				return m, nil
-			}
 			m.mode = modeMain
 			var flashMsg string
-			if msg.failed > 0 {
+			if msg.failed > 0 || msg.canceled > 0 {
 				flashMsg = fmt.Sprintf("Deleted %d/%d torrent(s)", msg.success, msg.total)
 			} else {
 				flashMsg = fmt.Sprintf("Deleted %d torrent(s)", msg.success)
+			}
+			if msg.canceled > 0 {
+				flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
 			}
 			if msg.detail != "" {
 				m.errText = strings.TrimSpace(msg.detail)
@@ -642,20 +658,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.refresh()
 			return m, tea.Batch(cmd, m.setFlash(flashSuccess, flashMsg))
 		case batchOpCopy:
-			if msg.err != nil {
-				m.errText = msg.err.Error()
-				return m, nil
-			}
 			m.mode = modeMain
 			var parts []string
+			if msg.copied == msg.resolved && msg.copied > 0 {
+				parts = append(parts, fmt.Sprintf("Copied %d URL(s)", msg.copied))
+			} else {
+				parts = append(parts, fmt.Sprintf("Resolved %d URL(s), copied %d", msg.resolved, msg.copied))
+			}
 			if msg.success > 0 {
-				parts = append(parts, fmt.Sprintf("Copied %d URL(s)", msg.success))
+				parts = append(parts, fmt.Sprintf("%d successful torrent(s)", msg.success))
+			}
+			if msg.partial > 0 {
+				parts = append(parts, fmt.Sprintf("%d partial torrent(s)", msg.partial))
 			}
 			if msg.skipped > 0 {
-				parts = append(parts, fmt.Sprintf("%d skipped (not downloaded)", msg.skipped))
+				parts = append(parts, fmt.Sprintf("%d skipped torrent(s)", msg.skipped))
 			}
 			if msg.failed > 0 {
-				parts = append(parts, fmt.Sprintf("%d failed", msg.failed))
+				parts = append(parts, fmt.Sprintf("%d failed torrent(s)", msg.failed))
+			}
+			if msg.canceled > 0 {
+				parts = append(parts, fmt.Sprintf("%d canceled torrent(s)", msg.canceled))
 			}
 			flashMsg := strings.Join(parts, ", ")
 			if msg.detail != "" {
@@ -665,18 +688,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clearBatchSelection()
 			m.batchMode = false
-			return m, m.setFlash(flashSuccess, flashMsg)
-		case batchOpBulkCleanup:
-			if msg.err != nil {
-				m.errText = msg.err.Error()
-				return m, nil
+			level := flashSuccess
+			if msg.partial > 0 || msg.failed > 0 || msg.canceled > 0 || msg.copied < msg.resolved {
+				level = flashWarn
 			}
+			return m, m.setFlash(level, flashMsg)
+		case batchOpBulkCleanup:
 			m.mode = modeBulkDownload
 			var flashMsg string
-			if msg.failed > 0 {
+			if msg.failed > 0 || msg.canceled > 0 {
 				flashMsg = fmt.Sprintf("Deleted %d/%d source torrent(s)", msg.success, msg.total)
 			} else {
 				flashMsg = fmt.Sprintf("Deleted %d source torrent(s)", msg.success)
+			}
+			if msg.canceled > 0 {
+				flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
 			}
 			if msg.detail != "" {
 				m.errText = strings.TrimSpace(msg.detail)
@@ -1997,7 +2023,7 @@ func addURLCmd(ctx context.Context, runtime *app.Runtime, service app.AppService
 func importCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, paths []string) tea.Cmd {
 	paths = slices.Clone(paths)
 	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return importMsg{results: service.ImportTorrentFiles(ctx, paths)}
+		return importMsg{result: app.NewBatchService(batchServiceAPI{service}, service, nil).Import(ctx, paths)}
 	})
 }
 
@@ -2014,15 +2040,20 @@ func deleteCmd(ctx context.Context, runtime *app.Runtime, service app.AppService
 	})
 }
 
-const batchDelay = 250 * time.Millisecond
+// Adapt the current facade without expanding every TUI dependency with raw API
+// methods. Local imports remain compatible with demo and existing consumers.
+type batchServiceAPI struct{ app.AppService }
 
-func batchTick(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(batchDelay):
-		return nil
+func (s batchServiceAPI) UnrestrictLink(ctx context.Context, link string) (models.UnrestrictedLink, error) {
+	return s.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
+}
+
+func (s batchServiceAPI) AddTorrentPath(ctx context.Context, path string) (models.AddTorrentResult, error) {
+	results := s.ImportTorrentFiles(ctx, []string{path})
+	if len(results) != 1 {
+		return models.AddTorrentResult{}, errors.New("import returned no result")
 	}
+	return models.AddTorrentResult{ID: results[0].TorrentID}, results[0].Err
 }
 
 func batchOpCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, op batchOp, ids []string, torrents []models.Torrent) tea.Cmd {
@@ -2047,87 +2078,56 @@ func batchOpCmd(ctx context.Context, runtime *app.Runtime, service app.AppServic
 }
 
 func executeBatchDelete(ctx context.Context, service app.AppService, ids []string) batchResultMsg {
-	result := batchResultMsg{op: batchOpDelete, total: len(ids)}
-	for i, id := range ids {
-		if err := ctx.Err(); err != nil {
-			result.err = err
-			result.failed += len(ids) - i
-			return result
+	batch := app.NewBatchService(batchServiceAPI{service}, service, nil).Delete(ctx, ids)
+	return batchMessage(batchOpDelete, batch)
+}
+
+func executeBatchCopy(ctx context.Context, service app.AppService, ids []string, torrents []models.Torrent) batchResultMsg {
+	byID := make(map[string]models.Torrent, len(torrents))
+	for _, torrent := range torrents {
+		byID[torrent.ID] = torrent
+	}
+	var requests []app.LinkRequest
+	for _, id := range ids {
+		torrent := byID[id]
+		if torrent.Status != "downloaded" || len(torrent.Links) == 0 {
+			requests = append(requests, app.LinkRequest{TorrentID: id})
+			continue
 		}
-		if i > 0 {
-			if err := batchTick(ctx); err != nil {
-				result.failed = len(ids) - i
-				result.err = err
-				return result
-			}
+		for index, link := range torrent.Links {
+			requests = append(requests, app.LinkRequest{TorrentID: id, Target: models.DownloadTarget{Index: index, Link: link}, Eligible: true})
 		}
-		if err := service.DeleteTorrent(ctx, id); err != nil {
-			result.failed++
-			result.detail += err.Error() + "\n"
-		} else {
-			result.success++
-		}
+	}
+	batch := app.NewBatchService(batchServiceAPI{service}, service, nil).CopyLinks(ctx, requests)
+	result := batchMessage(batchOpCopy, batch.BatchResult)
+	summary := app.SummarizeTorrents(batch.Items)
+	result.total = summary.Success + summary.Partial + summary.Failed + summary.Skipped + summary.Canceled
+	result.success, result.partial, result.failed, result.skipped, result.canceled = summary.Success, summary.Partial, summary.Failed, summary.Skipped, summary.Canceled
+	result.resolved, result.copied = len(batch.ResolvedURLs), batch.CopiedURLs
+	if batch.ClipboardErr != nil {
+		result.detail += batch.ClipboardErr.Error() + "\n"
 	}
 	return result
 }
 
-func executeBatchCopy(ctx context.Context, service app.AppService, ids []string, torrents []models.Torrent) batchResultMsg {
-	result := batchResultMsg{op: batchOpCopy, total: len(ids)}
-	idSet := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		idSet[id] = true
-	}
-	var urls []string
-	first := true
-	for _, t := range torrents {
-		if !idSet[t.ID] {
-			continue
-		}
-		if t.Status != "downloaded" {
+func batchMessage(op batchOp, batch app.BatchResult) batchResultMsg {
+	result := batchResultMsg{op: op, total: len(batch.Items), items: batch.Items, err: batch.Err}
+	for _, item := range batch.Items {
+		switch item.Kind {
+		case app.OutcomeSuccess:
+			result.success++
+		case app.OutcomeFailed:
+			result.failed++
+		case app.OutcomeSkipped:
 			result.skipped++
-			continue
+		case app.OutcomeCanceled:
+			result.canceled++
 		}
-		if len(t.Links) == 0 {
-			result.skipped++
-			continue
+		if item.Err != nil {
+			result.detail += fmt.Sprintf("%s: %v\n", item.TorrentID, item.Err)
 		}
-		for _, link := range t.Links {
-			if err := ctx.Err(); err != nil {
-				result.err = err
-				return result
-			}
-			if !first {
-				if err := batchTick(ctx); err != nil {
-					result.failed = result.total - result.success - result.skipped
-					result.err = err
-					return result
-				}
-			}
-			first = false
-			unrestricted, err := service.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
-			if err != nil {
-				result.failed++
-				result.detail += err.Error() + "\n"
-				continue
-			}
-			u := unrestricted.Download
-			if u == "" {
-				u = unrestricted.Link
-			}
-			if u != "" {
-				urls = append(urls, u)
-			}
-		}
-		result.success++
-	}
-	if len(urls) > 0 {
-		copied, err := service.CopyURL(strings.Join(urls, "\n"))
-		if err != nil {
-			result.err = err
-			return result
-		}
-		if !copied {
-			result.detail = "clipboard not available"
+		if item.RemoteOutcomeUnknown {
+			result.detail += "Remote outcome unknown; not replayed\n"
 		}
 	}
 	return result

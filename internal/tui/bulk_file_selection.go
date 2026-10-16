@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,12 +48,14 @@ type bulkFileSelectionDetailsMsg struct {
 }
 
 type bulkFileSelectionResultMsg struct {
-	total   int
-	success int
-	failed  int
-	skipped int
-	detail  string
-	err     error
+	total    int
+	success  int
+	failed   int
+	skipped  int
+	canceled int
+	items    []app.ItemOutcome
+	detail   string
+	err      error
 }
 
 type bulkFileSelectionSubmission struct {
@@ -273,42 +276,36 @@ func bulkFileSelectionSubmitCmd(ctx context.Context, runtime *app.Runtime, servi
 	}
 	baseOutcomes := slices.Clone(outcomes)
 	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		result := bulkFileSelectionResultMsg{}
-		var details []string
+		selections := make([]app.FileSelection, len(ordered))
+		for i, submission := range ordered {
+			selections[i] = app.FileSelection{TorrentID: submission.ID, FileIDs: submission.FileIDs}
+		}
+		batch := app.NewBatchService(batchServiceAPI{service}, service, nil).Select(ctx, selections)
+		items := make([]app.ItemOutcome, 0, len(baseOutcomes)+len(batch.Items))
+		names := make(map[string]string, len(baseOutcomes)+len(ordered))
 		for _, outcome := range baseOutcomes {
-			result.total++
-			switch outcome.Status {
-			case bulkFileSelectionFailed:
-				result.failed++
-				details = append(details, fmt.Sprintf("%s: %s", outcome.Name, outcome.Error))
-			case bulkFileSelectionSkipped:
-				result.skipped++
+			item := app.ItemOutcome{TorrentID: outcome.ID, Kind: app.OutcomeKind(outcome.Status)}
+			if outcome.Status == bulkFileSelectionFailed {
+				item.Err = errors.New(outcome.Error)
+			}
+			items = append(items, item)
+			names[outcome.ID] = outcome.Name
+		}
+		for _, submission := range ordered {
+			names[submission.ID] = submission.Name
+		}
+		items = append(items, batch.Items...)
+		counts := batchMessage("", app.BatchResult{Items: items, Err: batch.Err})
+		var details []string
+		for _, item := range items {
+			if item.Err != nil {
+				details = append(details, fmt.Sprintf("%s: %v", names[item.TorrentID], item.Err))
+			}
+			if item.RemoteOutcomeUnknown {
+				details = append(details, "Remote outcome unknown; not replayed")
 			}
 		}
-		for idx, submission := range ordered {
-			if err := ctx.Err(); err != nil {
-				result.err = err
-				return result
-			}
-			if idx > 0 {
-				if err := batchTick(ctx); err != nil {
-					result.failed += len(ordered) - idx
-					result.total += len(ordered) - idx
-					result.err = err
-					result.detail = strings.Join(details, "\n")
-					return result
-				}
-			}
-			result.total++
-			if err := service.SelectFiles(ctx, submission.ID, submission.FileIDs); err != nil {
-				result.failed++
-				details = append(details, fmt.Sprintf("%s: %s", submission.Name, err.Error()))
-				continue
-			}
-			result.success++
-		}
-		result.detail = strings.Join(details, "\n")
-		return result
+		return bulkFileSelectionResultMsg{total: counts.total, success: counts.success, failed: counts.failed, skipped: counts.skipped, canceled: counts.canceled, items: items, err: batch.Err, detail: strings.Join(details, "\n")}
 	})
 }
 

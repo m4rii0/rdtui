@@ -1,6 +1,22 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/m4rii0/rdtui/internal/app"
+)
+
+func TestBulkFileSelectionCommandCopiesNestedIDs(t *testing.T) {
+	service := &bulkFileSelectionTestService{}
+	submissions := []bulkFileSelectionSubmission{{ID: "a", FileIDs: []int{7}}}
+	cmd := bulkFileSelectionSubmitCmd(t.Context(), newTestRuntime(t), service, submissions, nil)
+	submissions[0].FileIDs[0] = 99
+	submissions[0].ID = "changed"
+	result := cmd().(bulkFileSelectionResultMsg)
+	if len(result.items) != 1 || result.items[0].Kind != app.OutcomeSuccess || len(service.selected["a"]) != 1 || service.selected["a"][0] != 7 {
+		t.Fatalf("result=%+v selected=%v", result, service.selected)
+	}
+}
 
 func TestBulkFileSelectionPrepareNextPrompt(t *testing.T) {
 	tests := []struct {
