@@ -30,10 +30,12 @@ const (
 var ErrAuthorizationPending = errors.New("authorization pending")
 
 type Client struct {
-	baseURL      string
-	oauthBaseURL string
-	token        string
-	httpClient   *http.Client
+	baseURL          string
+	oauthBaseURL     string
+	token            string
+	httpClient       *http.Client
+	tokenSource      TokenSource
+	authErrorHandler func(token string, err *APIError) error
 }
 
 type ErrorResponse struct {
@@ -41,27 +43,28 @@ type ErrorResponse struct {
 	ErrorCode int    `json:"error_code,omitzero"`
 }
 
-type apiError struct {
+// APIError describes an unsuccessful API response, including its HTTP status.
+type APIError struct {
 	StatusCode int
 	Message    string
 	Code       int
 }
 
-func (e *apiError) Error() string {
+func (e *APIError) Error() string {
 	if e.Code != 0 {
 		return fmt.Sprintf("real-debrid error %d (%d): %s", e.StatusCode, e.Code, e.Message)
 	}
 	return fmt.Sprintf("real-debrid error %d: %s", e.StatusCode, e.Message)
 }
 
-func NewClient(token, baseURL, oauthBaseURL string) *Client {
+func NewClient(token, baseURL, oauthBaseURL string, opts ...ClientOption) *Client {
 	if baseURL == "" {
 		baseURL = DefaultAPIBaseURL
 	}
 	if oauthBaseURL == "" {
 		oauthBaseURL = DefaultOAuthBaseURL
 	}
-	return &Client{
+	client := &Client{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		oauthBaseURL: strings.TrimRight(oauthBaseURL, "/"),
 		token:        token,
@@ -69,6 +72,10 @@ func NewClient(token, baseURL, oauthBaseURL string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	return client
 }
 
 func (c *Client) SetToken(token string) {
@@ -77,7 +84,7 @@ func (c *Client) SetToken(token string) {
 
 func (c *Client) User(ctx context.Context) (models.User, error) {
 	var out models.User
-	err := c.doJSON(ctx, http.MethodGet, c.baseURL+"/user", nil, "", &out)
+	err := c.doJSON(ctx, http.MethodGet, c.baseURL+"/user", nil, "", &out, true)
 	return out, err
 }
 
@@ -99,7 +106,7 @@ func (c *Client) ListTorrents(ctx context.Context, limit int) ([]models.Torrent,
 		Ended    string   `json:"ended"`
 		Links    []string `json:"links"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &raw); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &raw, true); err != nil {
 		return nil, err
 	}
 	out := make([]models.Torrent, 0, len(raw))
@@ -146,7 +153,7 @@ func (c *Client) TorrentInfo(ctx context.Context, id string) (models.TorrentInfo
 		} `json:"files"`
 	}
 	endpoint := fmt.Sprintf("%s/torrents/info/%s", c.baseURL, url.PathEscape(id))
-	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &raw); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &raw, true); err != nil {
 		return models.TorrentInfo{}, err
 	}
 	out := models.TorrentInfo{
@@ -181,7 +188,7 @@ func (c *Client) AddMagnet(ctx context.Context, magnet string) (models.AddTorren
 	values := url.Values{}
 	values.Set("magnet", magnet)
 	var out models.AddTorrentResult
-	resp, err := c.do(ctx, http.MethodPost, c.baseURL+"/torrents/addMagnet", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	resp, err := c.do(ctx, http.MethodPost, c.baseURL+"/torrents/addMagnet", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", true)
 	if err != nil {
 		return out, err
 	}
@@ -194,7 +201,7 @@ func (c *Client) AddMagnet(ctx context.Context, magnet string) (models.AddTorren
 
 func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byte) (models.AddTorrentResult, error) {
 	var out models.AddTorrentResult
-	req, err := c.newRequest(ctx, http.MethodPut, c.baseURL+"/torrents/addTorrent", bytes.NewReader(data))
+	req, err := c.newRequest(ctx, http.MethodPut, c.baseURL+"/torrents/addTorrent", bytes.NewReader(data), true)
 	if err != nil {
 		return out, err
 	}
@@ -203,7 +210,7 @@ func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byt
 		contentType = extType
 	}
 	req.Header.Set("Content-Type", contentType)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.sendAuthenticated(req)
 	if err != nil {
 		return out, err
 	}
@@ -233,7 +240,7 @@ func (c *Client) AddTorrentURL(ctx context.Context, torrentURL string) (models.A
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return models.AddTorrentResult{}, &apiError{StatusCode: resp.StatusCode, Message: "failed to fetch torrent url"}
+		return models.AddTorrentResult{}, &APIError{StatusCode: resp.StatusCode, Message: "failed to fetch torrent url"}
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -254,7 +261,7 @@ func (c *Client) SelectFiles(ctx context.Context, torrentID string, fileIDs []in
 		values.Set("files", strings.Join(parts, ","))
 	}
 	endpoint := fmt.Sprintf("%s/torrents/selectFiles/%s", c.baseURL, url.PathEscape(torrentID))
-	resp, err := c.do(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	resp, err := c.do(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", true)
 	if err != nil {
 		return err
 	}
@@ -264,7 +271,7 @@ func (c *Client) SelectFiles(ctx context.Context, torrentID string, fileIDs []in
 
 func (c *Client) DeleteTorrent(ctx context.Context, torrentID string) error {
 	endpoint := fmt.Sprintf("%s/torrents/delete/%s", c.baseURL, url.PathEscape(torrentID))
-	resp, err := c.do(ctx, http.MethodDelete, endpoint, nil, "")
+	resp, err := c.do(ctx, http.MethodDelete, endpoint, nil, "", true)
 	if err != nil {
 		return err
 	}
@@ -276,7 +283,7 @@ func (c *Client) UnrestrictLink(ctx context.Context, link string) (models.Unrest
 	values := url.Values{}
 	values.Set("link", link)
 	var out models.UnrestrictedLink
-	err := c.doJSON(ctx, http.MethodPost, c.baseURL+"/unrestrict/link", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &out)
+	err := c.doJSON(ctx, http.MethodPost, c.baseURL+"/unrestrict/link", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &out, true)
 	return out, err
 }
 
@@ -286,7 +293,7 @@ func (c *Client) StartDeviceAuth(ctx context.Context, clientID string) (models.D
 	}
 	endpoint := fmt.Sprintf("%s/device/code?client_id=%s&new_credentials=yes", c.oauthBaseURL, url.QueryEscape(clientID))
 	var out models.DeviceCode
-	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &out); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &out, false); err != nil {
 		return models.DeviceCode{}, err
 	}
 	out.RequestedAt = time.Now()
@@ -295,7 +302,7 @@ func (c *Client) StartDeviceAuth(ctx context.Context, clientID string) (models.D
 
 func (c *Client) PollDeviceCredentials(ctx context.Context, clientID, deviceCode string) (string, string, error) {
 	endpoint := fmt.Sprintf("%s/device/credentials?client_id=%s&code=%s", c.oauthBaseURL, url.QueryEscape(clientID), url.QueryEscape(deviceCode))
-	resp, err := c.do(ctx, http.MethodGet, endpoint, nil, "")
+	resp, err := c.do(ctx, http.MethodGet, endpoint, nil, "", false)
 	if err != nil {
 		return "", "", err
 	}
@@ -307,9 +314,9 @@ func (c *Client) PollDeviceCredentials(ctx context.Context, clientID, deviceCode
 			if strings.Contains(strings.ToLower(apiErr.Error), "pending") || strings.Contains(strings.ToLower(apiErr.Error), "denied") || resp.StatusCode == http.StatusNotFound {
 				return "", "", ErrAuthorizationPending
 			}
-			return "", "", &apiError{StatusCode: resp.StatusCode, Message: apiErr.Error, Code: apiErr.ErrorCode}
+			return "", "", &APIError{StatusCode: resp.StatusCode, Message: apiErr.Error, Code: apiErr.ErrorCode}
 		}
-		return "", "", &apiError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
+		return "", "", &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
 	}
 	var raw struct {
 		ClientID     string `json:"client_id"`
@@ -341,7 +348,7 @@ func (c *Client) tokenRequest(ctx context.Context, clientID, clientSecret, code 
 		TokenType    string `json:"token_type"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := c.doJSON(ctx, http.MethodPost, c.oauthBaseURL+"/token", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &raw); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, c.oauthBaseURL+"/token", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &raw, false); err != nil {
 		return models.DeviceCredentials{}, err
 	}
 	now := time.Now()
@@ -356,8 +363,8 @@ func (c *Client) tokenRequest(ctx context.Context, clientID, clientSecret, code 
 	}, nil
 }
 
-func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Reader, contentType string, target any) error {
-	resp, err := c.do(ctx, method, endpoint, body, contentType)
+func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Reader, contentType string, target any, authenticated bool) error {
+	resp, err := c.do(ctx, method, endpoint, body, contentType, authenticated)
 	if err != nil {
 		return err
 	}
@@ -365,25 +372,56 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Re
 	return c.decodeResponse(resp, target, http.StatusOK)
 }
 
-func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader, contentType string) (*http.Response, error) {
-	req, err := c.newRequest(ctx, method, endpoint, body)
+func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader, contentType string, authenticated bool) (*http.Response, error) {
+	req, err := c.newRequest(ctx, method, endpoint, body, authenticated)
 	if err != nil {
 		return nil, err
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	if authenticated {
+		return c.sendAuthenticated(req)
+	}
 	return c.httpClient.Do(req)
 }
 
-func (c *Client) newRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, endpoint string, body io.Reader, authenticated bool) (*http.Request, error) {
+	var token string
+	if authenticated {
+		token = c.token
+		if c.tokenSource != nil {
+			var err error
+			token, err = c.tokenSource(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent())
-	c.authorize(req)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	return req, nil
+}
+
+func (c *Client) sendAuthenticated(req *http.Request) (*http.Response, error) {
+	// Capture before sending: a late rejection must not invalidate a newer token.
+	token := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && c.authErrorHandler != nil {
+		defer func() { _ = resp.Body.Close() }()
+		apiErr := readAPIError(resp)
+		return nil, errors.Join(apiErr, c.authErrorHandler(token, apiErr))
+	}
+	return resp, nil
 }
 
 func userAgent() string {
@@ -392,12 +430,6 @@ func userAgent() string {
 		appVersion = "dev"
 	}
 	return "rdtui/" + appVersion
-}
-
-func (c *Client) authorize(req *http.Request) {
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
 }
 
 func (c *Client) decodeResponse(resp *http.Response, target any, okStatuses ...int) error {
@@ -419,12 +451,16 @@ func (c *Client) expectStatus(resp *http.Response, okStatuses ...int) error {
 			return nil
 		}
 	}
+	return readAPIError(resp)
+}
+
+func readAPIError(resp *http.Response) *APIError {
 	body, _ := io.ReadAll(resp.Body)
 	var apiErr ErrorResponse
 	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error != "" {
-		return &apiError{StatusCode: resp.StatusCode, Message: apiErr.Error, Code: apiErr.ErrorCode}
+		return &APIError{StatusCode: resp.StatusCode, Message: apiErr.Error, Code: apiErr.ErrorCode}
 	}
-	return &apiError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
+	return &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
 }
 
 func parseTime(value string) time.Time {
