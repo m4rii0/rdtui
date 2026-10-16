@@ -240,16 +240,16 @@ func TestQueueDuplicateCompletionAdvancesOnce(t *testing.T) {
 	r.admit(t, 0)
 	first := receive(t, r.b.statuses)
 	ref, _ := r.c.Current()
-	other := asyncStatus(r.c, t.Context(), ref.Ref)
+	waiter := observeWait(t.Context())
+	other := asyncStatus(r.c, waiter, ref.Ref)
+	// Register the duplicate before releasing the shared observation. Without
+	// this barrier an old query worker can run after gid2's worker, and replying
+	// to the presumed "third" query completes gid0 rather than the current item.
+	receive(t, waiter.waiting)
 	first.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 	r.admit(t, 1)
-	// A delayed request for the old reference is either coalesced or stale;
-	// it cannot be used by the queue to finish item 1.
+	// The duplicate observation of the old reference cannot finish item 1.
 	second := receive(t, r.b.statuses)
-	if second.gid != "gid1" { // A non-coalesced old query may run before admission.
-		second.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
-		second = receive(t, r.b.statuses)
-	}
 	if second.gid != "gid1" {
 		t.Fatal(second.gid)
 	}
@@ -260,6 +260,9 @@ func TestQueueDuplicateCompletionAdvancesOnce(t *testing.T) {
 	second.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 	r.admit(t, 2)
 	third := receive(t, r.b.statuses)
+	if third.gid != "gid2" {
+		t.Fatal(third.gid)
+	}
 	third.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
 	receive(t, other)
 	finishQueue(t, r, id)

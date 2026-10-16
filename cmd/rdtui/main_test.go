@@ -4,15 +4,97 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/aria2"
+	"github.com/m4rii0/rdtui/internal/config"
+	"github.com/m4rii0/rdtui/internal/directdl"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 type failingWriter struct {
 	err error
+}
+
+func TestEveryBackendEntryUsesDirectDefault(t *testing.T) {
+	for _, backend := range []string{"", "invalid", "direct", "aria2"} {
+		t.Run(backend, func(t *testing.T) {
+			manager, err := productionBackend(t.Context(), config.EffectiveConfig{DownloadBackend: models.DownloadBackend(backend)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := manager.Shutdown(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+			if backend == "aria2" {
+				if _, ok := manager.(*aria2.Manager); !ok {
+					t.Fatalf("explicit aria2 = %T", manager)
+				}
+			} else if _, ok := manager.(*directdl.Manager); !ok {
+				t.Fatalf("backend %q = %T, want direct", backend, manager)
+			}
+		})
+	}
+}
+
+func TestCompositionMapsApplicationComponents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer captured" {
+			t.Errorf("request token: %s", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/user":
+			_, _ = io.WriteString(w, `{"id":1,"username":"composed"}`)
+		case "/torrents":
+			_, _ = io.WriteString(w, `[{"id":"id","filename":"composed.iso"}]`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for key, value := range map[string]string{"XDG_CONFIG_HOME": t.TempDir(), "APPDATA": t.TempDir(), "HOME": t.TempDir(), "USERPROFILE": t.TempDir(),
+		"RDTUI_API_BASE_URL": server.URL, "RDTUI_OAUTH_BASE_URL": server.URL, "RDTUI_PRIVATE_TOKEN": "captured"} {
+		t.Setenv(key, value)
+	}
+	options, err := productionOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.HTTPClient = server.Client()
+	t.Setenv("RDTUI_PRIVATE_TOKEN", "later-token")
+	t.Setenv("RDTUI_API_BASE_URL", "http://invalid.invalid")
+	a, err := app.NewApplication(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanupRuntime(a.Runtime, a.Close); err != nil {
+			t.Error(err)
+		}
+	})
+	deps := applicationDependencies(a)
+	if deps.Runtime != a.Runtime || deps.Auth != a.Auth || deps.Torrents != a.Torrents || deps.Downloads != a.Downloads || deps.Batches != a.Batches || deps.Bulk != a.Bulk || deps.Desktop != a.Desktop || deps.PrepareDownload == nil {
+		t.Fatal("command replaced application dependencies")
+	}
+	session, err := deps.Auth.Bootstrap(t.Context())
+	if err != nil || session.User.Username != "composed" || session.Token != "" {
+		t.Fatalf("auth component: %+v %v", session, err)
+	}
+	torrents, err := deps.Torrents.ListTorrents(t.Context())
+	if err != nil || len(torrents) != 1 || torrents[0].Filename != "composed.iso" {
+		t.Fatalf("torrent component: %v %v", torrents, err)
+	}
 }
 
 func TestRuntimeCleanupUsesIndependentBudget(t *testing.T) {

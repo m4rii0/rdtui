@@ -59,6 +59,7 @@ type DownloadCoordinator struct {
 	transfer   context.CancelFunc
 	start      *startReservation
 	query      *statusQuery
+	queryErr   error
 	nextQueue  QueueID
 	lease      QueueLease
 	owner      QueueID
@@ -95,6 +96,22 @@ func NewDownloadCoordinator(parent context.Context, backend download.Backend, di
 }
 
 func (c *DownloadCoordinator) Start(ctx context.Context, url, filename string) (DownloadStart, error) {
+	if err := ctx.Err(); err != nil {
+		return DownloadStart{}, err
+	}
+	c.mu.Lock()
+	var unobserved DownloadRef
+	if c.lease.ID == 0 && c.query == nil && c.queryErr == nil && c.current != nil && !c.current.Download.IsTerminal() {
+		unobserved = c.current.Ref
+	}
+	c.mu.Unlock()
+	if unobserved != (DownloadRef{}) {
+		// Refresh standalone transfers after leaving their screen. Queues own
+		// their observation, and an in-flight query must not block reopening a
+		// known active transfer. Failed observations reopen the cached transfer
+		// without another wait; polling owns recovery from query errors.
+		_, _ = c.Status(ctx, unobserved)
+	}
 	return c.startDownload(ctx, QueueLease{}, url, filename)
 }
 
@@ -175,6 +192,7 @@ func (c *DownloadCoordinator) runStart(ctx context.Context, cancel context.Cance
 		})
 		reservation.snapshot = DownloadSnapshot{Ref: DownloadRef{Generation: reservation.generation, GID: started.GID}, Download: started}
 		c.current = new(reservation.snapshot)
+		c.queryErr = nil
 		c.transfer = cancel
 		c.owner = reservation.owner
 		if started.IsTerminal() {
@@ -344,6 +362,7 @@ func (c *DownloadCoordinator) runStatus(query *statusQuery) {
 	}
 	query.snapshot = *c.current
 	query.err = err
+	c.queryErr = err
 	if err == nil && !c.current.Download.IsTerminal() {
 		observed = mergeDownload(observed, c.current.Download)
 		observed.GID = query.ref.GID

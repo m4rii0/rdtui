@@ -34,6 +34,7 @@ type Client struct {
 	oauthBaseURL     string
 	token            string
 	httpClient       *http.Client
+	now              func() time.Time
 	tokenSource      TokenSource
 	authErrorHandler func(token string, err *APIError) error
 }
@@ -68,6 +69,7 @@ func NewClient(token, baseURL, oauthBaseURL string, opts ...ClientOption) *Clien
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		oauthBaseURL: strings.TrimRight(oauthBaseURL, "/"),
 		token:        token,
+		now:          time.Now,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -222,6 +224,11 @@ func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byt
 }
 
 func (c *Client) AddTorrentPath(ctx context.Context, path string) (models.AddTorrentResult, error) {
+	if c.tokenSource != nil {
+		if _, err := c.tokenSource(ctx); err != nil {
+			return models.AddTorrentResult{}, err
+		}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return models.AddTorrentResult{}, fmt.Errorf("read torrent %s: %w", path, err)
@@ -230,6 +237,11 @@ func (c *Client) AddTorrentPath(ctx context.Context, path string) (models.AddTor
 }
 
 func (c *Client) AddTorrentURL(ctx context.Context, torrentURL string) (models.AddTorrentResult, error) {
+	if c.tokenSource != nil {
+		if _, err := c.tokenSource(ctx); err != nil {
+			return models.AddTorrentResult{}, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, torrentURL, nil)
 	if err != nil {
 		return models.AddTorrentResult{}, err
@@ -296,7 +308,7 @@ func (c *Client) StartDeviceAuth(ctx context.Context, clientID string) (models.D
 	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, "", &out, false); err != nil {
 		return models.DeviceCode{}, err
 	}
-	out.RequestedAt = time.Now()
+	out.RequestedAt = c.now()
 	return out, nil
 }
 
@@ -351,7 +363,7 @@ func (c *Client) tokenRequest(ctx context.Context, clientID, clientSecret, code 
 	if err := c.doJSON(ctx, http.MethodPost, c.oauthBaseURL+"/token", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", &raw, false); err != nil {
 		return models.DeviceCredentials{}, err
 	}
-	now := time.Now()
+	now := c.now()
 	return models.DeviceCredentials{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,

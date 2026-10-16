@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,11 +13,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/aria2"
+	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/internal/demo"
+	"github.com/m4rii0/rdtui/internal/directdl"
+	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/internal/tui"
 	updater "github.com/m4rii0/rdtui/internal/update"
 	"github.com/m4rii0/rdtui/internal/version"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func main() {
@@ -62,17 +68,20 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 	var closeService func(context.Context) error
 	if os.Getenv("RDTUI_DEMO") == "1" {
 		svc := demo.NewService(runtime.Context())
-		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc, downloadAdapter{svc}, svc
+		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc, svc, svc
 		deps.Batches, deps.Bulk, deps.PrepareDownload = svc.NewBatches(), svc.NewBulkQueue(runtime), svc.PrepareDownload
-		closeService = svc.CloseContext
+		closeService = svc.Close
 	} else {
-		svc, err := app.New(runtime.Context())
+		options, err := productionOptions()
 		if err != nil {
 			return fmt.Errorf("failed to initialize app: %w", err)
 		}
-		closeService = svc.CloseContext
-		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc.Torrents(), downloadAdapter{svc}, svc
-		deps.Batches, deps.Bulk, deps.PrepareDownload = svc.NewBatches(), svc.NewBulkQueue(runtime), svc.PrepareDownload
+		application, err := app.NewApplication(runtime.Context(), options)
+		if err != nil {
+			return fmt.Errorf("failed to initialize app: %w", err)
+		}
+		closeService = application.Close
+		deps = applicationDependencies(application)
 	}
 	defer func() { err = errors.Join(err, cleanupRuntime(runtime, closeService)) }()
 
@@ -83,18 +92,64 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 	return nil
 }
 
-// Keep the old facade's method name out of consuming feature interfaces.
-type downloadAdapter struct {
-	downloadFacade
+func applicationDependencies(a *app.Application) tui.Dependencies {
+	return tui.Dependencies{Runtime: a.Runtime, Auth: a.Auth, Torrents: a.Torrents,
+		Downloads: a.Downloads, Batches: a.Batches, Bulk: a.Bulk, Desktop: a.Desktop,
+		PrepareDownload: a.PrepareDownload}
 }
 
-type downloadFacade interface {
-	Start(context.Context, string, string) (app.DownloadStart, error)
-	Status(context.Context, app.DownloadRef) (app.DownloadSnapshot, error)
-	CurrentDownload() (app.DownloadSnapshot, bool)
+// Process inputs and production defaults are captured only at the entry point.
+func productionOptions() (app.ApplicationOptions, error) {
+	store, err := config.NewStore()
+	if err != nil {
+		return app.ApplicationOptions{}, err
+	}
+	home, _ := os.UserHomeDir() // Configuration resolution reports a missing required home.
+	return app.ApplicationOptions{
+		Store: store, Home: home,
+		Overrides: config.Overrides{PrivateToken: os.Getenv("RDTUI_PRIVATE_TOKEN"),
+			APIBaseURL: os.Getenv("RDTUI_API_BASE_URL"), OAuthBaseURL: os.Getenv("RDTUI_OAUTH_BASE_URL")},
+		HTTPClient: &http.Client{Timeout: 30 * time.Second}, Now: time.Now,
+		Wait: func(ctx context.Context, delay time.Duration) error {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+		Stat: downloadFileSize, Desktop: systemDesktop{}, BackendFactory: productionBackend,
+	}, nil
 }
 
-func (a downloadAdapter) Current() (app.DownloadSnapshot, bool) { return a.CurrentDownload() }
+func productionBackend(_ context.Context, cfg config.EffectiveConfig) (download.Backend, error) {
+	if cfg.DownloadBackend == models.DownloadBackendAria2 {
+		return aria2.NewManager(cfg.Aria2BinaryPath), nil
+	}
+	return directdl.NewManager(), nil
+}
+
+func downloadFileSize(path string) (int64, bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if info.IsDir() {
+		return 0, false, fmt.Errorf("download target is directory: %s", path)
+	}
+	return info.Size(), true, nil
+}
+
+type systemDesktop struct{}
+
+func (systemDesktop) CopyURL(url string) (bool, error)    { return download.CopyURL(url) }
+func (systemDesktop) OpenFile(path string) error          { return download.OpenFile(path) }
+func (systemDesktop) RevealInDirectory(path string) error { return download.RevealInDirectory(path) }
 
 func cleanupRuntime(runtime *app.Runtime, closeService func(context.Context) error) error {
 	runtime.Stop()

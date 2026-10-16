@@ -23,6 +23,59 @@ type coordinatorBackend struct {
 	shutdownOnce                           sync.Once
 }
 
+func TestStartReopensActiveWithoutWaitingForObservation(t *testing.T) {
+	for _, name := range []string{"in-flight-single-observation", "queue-before-observation", "failed-single-observation"} {
+		t.Run(name, func(t *testing.T) {
+			queued := name == "queue-before-observation"
+			b := newCoordinatorBackend()
+			c := testCoordinator(t, b)
+			var current DownloadSnapshot
+			var observed <-chan statusResult
+			var query statusCall
+			if queued {
+				lease, err := c.AcquireQueue(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				results := make(chan startResult, 1)
+				go func() {
+					started, err := c.StartQueued(t.Context(), lease, "queued", "queued")
+					results <- startResult{started, err}
+				}()
+				call := receive(t, b.starts)
+				call.reply <- backendResult{download: models.ManagedDownload{GID: "queued", Status: models.ManagedDownloadStatusActive}}
+				result := receive(t, results)
+				if result.err != nil {
+					t.Fatal(result.err)
+				}
+				current = result.start.Snapshot
+			} else {
+				current = admit(t, c, b, "single")
+				observed = asyncStatus(c, t.Context(), current.Ref)
+				query = receive(t, b.statuses)
+				if name == "failed-single-observation" {
+					query.reply <- backendResult{err: errors.New("status transport failure")}
+					receive(t, observed)
+					observed = nil
+				}
+			}
+			// The observation is deliberately withheld until Start has reopened
+			// the existing transfer. Reuse must not depend on remote observation.
+			result := receive(t, asyncStart(c, t.Context()))
+			if result.err != nil || !result.start.Reused || result.start.Snapshot.Ref != current.Ref {
+				t.Fatalf("reopen: %+v", result)
+			}
+			if b.startCalls.Load() != 1 {
+				t.Fatal("reopen started another transfer")
+			}
+			if observed != nil {
+				query.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusActive}}
+				receive(t, observed)
+			}
+		})
+	}
+}
+
 func TestQueueTerminalObservationCannotResurrectTransfer(t *testing.T) {
 	b := newCoordinatorBackend()
 	c := testCoordinator(t, b)

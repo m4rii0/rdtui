@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
@@ -261,6 +262,9 @@ func bulkFileSelectionDetailsCmd(ctx context.Context, runtime *app.Runtime, serv
 			info, err := service.TorrentInfo(ctx, plan.ID)
 			if err != nil {
 				outcomes = append(outcomes, bulkFileSelectionOutcome{ID: plan.ID, Name: plan.Name, Status: bulkFileSelectionFailed, Error: err.Error()})
+				if errors.Is(err, auth.ErrNoValidCredentials) {
+					return bulkFileSelectionDetailsMsg{details: details, outcomes: outcomes, err: err}
+				}
 				continue
 			}
 			details = append(details, info)

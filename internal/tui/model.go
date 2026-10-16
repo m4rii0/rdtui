@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
+	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/debug"
 	"github.com/m4rii0/rdtui/internal/version"
 	"github.com/m4rii0/rdtui/pkg/models"
@@ -273,6 +275,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		msg = result.msg
 	}
+	if err := m.authenticationRequired(msg); err != nil {
+		m.auth.invalidate()
+		m.list.invalidate()
+		m.detailRequest.invalidate()
+		m.setup.invalidate()
+		m.downloadPoll.invalidate()
+		m.queuePoll.invalidate()
+		m.session, m.deviceCode = nil, nil
+		m.loading, m.mode = false, modeAuthChoice
+		m.status, m.errText = "Choose an authentication method", err.Error()
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case bootstrapMsg, authMsg, deviceStartMsg, devicePollMsg, devicePollTickMsg:
 		cmd := m.authModel.update(&m, msg)
@@ -322,6 +336,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInput, cmd = m.searchInput.Update(msg)
 	}
 	return m, cmd
+}
+
+// Authentication is a root navigation concern. Preserve each feature's stale
+// result checks before interpreting a rejection, including per-item batch errors.
+func (m Model) authenticationRequired(msg tea.Msg) error {
+	var err error
+	var items []app.ItemOutcome
+	switch msg := msg.(type) {
+	case torrentsMsg:
+		err = msg.err
+	case detailMsg:
+		if !m.detailRequest.current(msg.request) || msg.id != m.selectedTorrentID() {
+			return nil
+		}
+		err = msg.err
+	case addTorrentMsg:
+		err = msg.err
+	case selectFilesMsg:
+		err = msg.err
+	case deleteMsg:
+		err = msg.err
+	case importMsg:
+		err, items = msg.result.Err, msg.result.Items
+	case batchResultMsg:
+		err, items = msg.err, msg.items
+	case bulkFileSelectionResultMsg:
+		err, items = msg.err, msg.items
+	case bulkFileSelectionDetailsMsg:
+		err = msg.err
+	case bulkDetailsMsg:
+		err = msg.err
+	case resolvedDownloadMsg:
+		err = msg.err
+	case handoffMsg:
+		err = msg.err
+	case operationErrorMsg:
+		err = msg.err
+	case bulkStartedMsg:
+		if m.bulk == nil || msg.generation != m.queueGeneration {
+			return nil
+		}
+		err = msg.err
+	case bulkSnapshotMsg:
+		if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
+			return nil
+		}
+		err = msg.err
+		for _, item := range msg.snapshot.Items {
+			if item.Outcome != nil {
+				items = append(items, *item.Outcome)
+			}
+		}
+	}
+	for _, item := range items {
+		err = errors.Join(err, item.Err)
+	}
+	if errors.Is(err, auth.ErrNoValidCredentials) {
+		return err
+	}
+	return nil
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
