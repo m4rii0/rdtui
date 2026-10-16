@@ -17,11 +17,14 @@ func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
 	if m.helpVisible {
 		bg := appStyle.Render(renderBackground(m))
-		return renderOverlayOnBackground(bg, renderHelpOverlay(m), m.width, m.height)
+		return boundView(renderOverlayOnBackground(bg, renderHelpOverlay(m), m.width, m.height), m.width, m.height)
 	}
 	if isPopupMode(m.mode) {
 		bg := appStyle.Render(renderBackground(m))
-		return renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height)
+		return boundView(renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height), m.width, m.height)
+	}
+	if (m.mode == modeMain || m.mode == modeSearch) && ((m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12)) {
+		return renderCompactMain(m)
 	}
 	return appStyle.Render(renderBackground(m))
 }
@@ -112,46 +115,24 @@ func renderMain(m Model) string {
 	if width <= 0 {
 		width = 120
 	}
-	innerWidth := width - 4
-
-	bodyHeight := m.height - 2
-	if bodyHeight <= 0 {
-		bodyHeight = 24
-	}
-	reserved := 4 // header(1) + empty(1) + dividerLine(1) + footer(1)
-	if m.status != "" {
-		reserved++
-	}
-	if m.errText != "" {
-		reserved++
-	}
-	if m.mode == modeSearch || m.filterApplied {
-		reserved++
-	}
-	tableHeight := max(4, bodyHeight-reserved)
+	innerWidth := max(1, width-4)
+	tableHeight := mainTableHeight(width, m.height)
 
 	header := renderHeaderLine(renderCompactHeader(m.version, username(m)), m, innerWidth)
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
-	lines := []string{header, "", table}
-	if bar := renderSearchBar(m); bar != "" {
-		lines = append(lines, bar)
-	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	footer := renderShortcutFooter(m.renderShortcutDefs(), m)
+	lines := []string{header, table, oneLine(renderSearchBar(m), innerWidth), mutedStyle.Render("No active download"), renderFeedback(m, innerWidth)}
+	footer := "? help  ·  ↑↓ move  ·  " + renderShortcutFooter(m.renderShortcutDefs(), m)
 	if m.mode == modeMain && m.batchMode {
 		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
 	}
 	lines = append(lines, dividerLine(innerWidth), truncateLine(footer, innerWidth))
+	for i := range lines {
+		if i != 1 {
+			lines[i] = oneLine(lines[i], innerWidth)
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 

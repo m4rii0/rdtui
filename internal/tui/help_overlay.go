@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var helpGroupOrder = []shortcutGroup{
@@ -15,9 +16,8 @@ var helpGroupOrder = []shortcutGroup{
 	shortcutGroupGlobal,
 }
 
-func renderHelpOverlay(m Model) string {
-	popupW, _ := popupSize(m.width, m.height)
-	innerW := popupW - 4
+func helpContent(m Model) []string {
+	innerW := helpWidth(m) - 4
 	defs := sortShortcutDefs(m.helpContextShortcutDefs())
 	grouped := make(map[shortcutGroup][]shortcutDef)
 	for _, def := range defs {
@@ -60,8 +60,32 @@ func renderHelpOverlay(m Model) string {
 	if len(lines) == 0 {
 		lines = append(lines, mutedStyle.Render("  No shortcuts available"))
 	}
-	lines = append(lines, "", popupFooter(shortcutHint{Key: "?/esc", Desc: "close"}))
-	return popupBox(helpOverlayTitle(m), strings.Join(lines, "\n"), innerW, false)
+	if m.errText != "" {
+		lines = append(lines, "", headStyle.Render("Current error"))
+		lines = append(lines, strings.Split(ansi.Hardwrap(m.errText, max(1, innerW), false), "\n")...)
+	}
+	return lines
+}
+
+func helpWidth(m Model) int {
+	if m.width <= 0 {
+		return 76
+	}
+	return max(5, min(m.width, m.width*7/10+4))
+}
+func helpRows(m Model) int {
+	if m.height <= 0 {
+		return max(1, len(helpContent(m)))
+	}
+	return max(1, m.height-6)
+}
+func helpMaxOffset(m Model) int { return max(0, len(helpContent(m))-helpRows(m)) }
+func renderHelpOverlay(m Model) string {
+	lines := helpContent(m)
+	start := min(max(0, m.helpOffset), max(0, len(lines)-helpRows(m)))
+	lines = lines[start:min(len(lines), start+helpRows(m))]
+	content := strings.Join(lines, "\n") + "\n" + mutedStyle.Render("↑↓ pgup/pgdown scroll · esc close")
+	return boundView(popupBox(helpOverlayTitle(m), content, helpWidth(m)-4, false), m.width, m.height)
 }
 
 func helpOverlayTitle(m Model) string {

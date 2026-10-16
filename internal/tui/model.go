@@ -119,6 +119,7 @@ type Model struct {
 	inputAction inputAction
 	spinner     spinner.Model
 	helpVisible bool
+	helpOffset  int
 	flash       flashState
 }
 
@@ -542,6 +543,17 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	switch action {
 	case actionToggleHelp:
 		m.helpVisible = true
+		m.helpOffset = 0
+		return m, nil
+	case actionHelpUp, actionHelpDown, actionHelpPageUp, actionHelpPageDown:
+		delta := 1
+		if action == actionHelpPageUp || action == actionHelpPageDown {
+			delta = max(1, m.height-6)
+		}
+		if action == actionHelpUp || action == actionHelpPageUp {
+			delta = -delta
+		}
+		m.helpOffset = max(0, min(m.helpOffset+delta, helpMaxOffset(m)))
 		return m, nil
 	case actionCloseHelp:
 		m.helpVisible = false
