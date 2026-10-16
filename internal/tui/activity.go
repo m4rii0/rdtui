@@ -93,7 +93,14 @@ func (m Model) openActivity() (tea.Model, tea.Cmd) {
 }
 
 func activityFooter(m Model, width int) string {
-	return oneLine("F6 activity · ? help · "+renderShortcutFooter(m.renderShortcutDefs(), m), width)
+	defs := m.renderShortcutDefs()
+	filtered := make([]shortcutDef, 0, len(defs))
+	for _, def := range defs {
+		if def.action != actionOpenActivity && def.action != actionToggleHelp {
+			filtered = append(filtered, def)
+		}
+	}
+	return oneLine("F6 activity · ? help · "+renderShortcutFooter(filtered, m), width)
 }
 
 func finishWorkbench(m Model, lines []string, width int) string {

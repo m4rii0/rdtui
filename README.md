@@ -240,6 +240,7 @@ Once authenticated, the main screen shows a master-detail torrent workbench.
 
 Key bindings (main view):
 - `j` / `k`: move between torrents
+- `Home` / `End`: first / last visible torrent; `PgUp` / `PgDn`: move one visible page
 - `enter`: open torrent detail view
 - `/`: search and filter torrents (fuzzy match)
 - `r`: refresh torrents
@@ -252,8 +253,22 @@ Key bindings (main view):
 - `x`: delete the selected torrent
 - `b`: enter bulk operations mode (select multiple torrents)
 - `S` / `P` / `Z` / `D` / `N`: sort by status / progress / size / date / name
+- `o`: open the sort picker (selecting the current column toggles its direction)
+- `F6`: reopen the current download or bulk queue without starting another transfer
 - `?`: toggle help overlay
-- `q`: quit (or clear active filter)
+- `esc`: exit bulk selection first, otherwise clear a kept filter without losing the selected torrent
+- `q`: quit; confirm with `y` if a download or bulk queue is active (`enter`, `n`, or `esc` stays)
+
+The activity strip remains visible while browsing and shows the latest download or
+queue status. `F6` opens it even when no torrent is selected; `esc` returns to the
+previous screen. Main-screen search, feedback and activity rows reserve their space
+so messages do not move the table. On narrow terminals, secondary columns disappear
+before the torrent name; hidden columns remain searchable and sortable.
+
+Press `?` to inspect shortcuts and the full current error; use arrows or
+`PgUp` / `PgDn` to scroll the help overlay. `q` also quits from detail and transfer
+screens, but remains ordinary input while typing a search or editing a form.
+`Ctrl+C` exits immediately without the active-work confirmation.
 
 Bulk operations mode (`b`):
 - `space`: mark/unmark torrent

@@ -256,6 +256,27 @@ not a cross-process lock, cross-file transaction, or power-loss durability promi
 
 ## Acceptance traceability
 
+### TUI UX presentation contracts
+
+`internal/tui/layout.go` owns fixed list geometry and single-line feedback;
+`activity.go` projects existing observed transfer/queue state and returns to the
+prior base screen with a dedicated context. `navigation.go` owns page movement,
+ordering and the quit dialog. Quit context is separate from popup/download return
+destinations. No render path starts work or performs network I/O. Standalone
+download observation continues outside the progress screen at the existing cadence.
+
+List columns adapt at 40/60/80 usable cells after marking/scrollbar space. Stable
+column indices keep hidden fields sortable and searchable. Help is viewport-bounded
+and includes the full current error with scrolling. Main/search geometry reserves
+search, activity and feedback rows even when idle. `F6` navigates without admitting
+work; `q` asks before canceling active downloads/queues; Ctrl+C remains immediate.
+
+Regression coverage: `TestMainStableGeometry`, `TestHelpErrorScroll`,
+`TestAdaptiveColumns`, `TestAdaptiveColumnHighlights`, `TestActivityStrip`,
+`TestActivityNavigation`, `TestActivityBackgroundObservation`, `TestListPageNavigation`,
+`TestNavigationEscapeAndInput`, `TestSortPicker`, `TestQuitConfirmation`, and
+`TestUXResizeAndNavigationPreservesWork` in `internal/tui`.
+
 Representative executable evidence below is in addition to the existing sorting,
 slice ownership, and JSON regression suite. Test names are searchable with
 `go test ./... -run '<name>'`; the full gates remain authoritative.

@@ -92,6 +92,15 @@ func TestActivityNavigation(t *testing.T) {
 	}
 }
 
+func TestActivityFooterPriority(t *testing.T) {
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
+	m.mode = modeMain
+	footer := ansi.Strip(activityFooter(m, 36))
+	if strings.Count(footer, "F6") != 1 || !strings.Contains(footer, "? help") || !strings.Contains(footer, "move") {
+		t.Fatalf("essential hints crowded out: %q", footer)
+	}
+}
+
 func TestActivityBackgroundObservation(t *testing.T) {
 	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
