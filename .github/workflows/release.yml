@@ -1,5 +1,5 @@
 name: Release
-run-name: Release ${{ inputs.bump }} bump
+run-name: Release ${{ inputs.channel }} (${{ inputs.bump }} bump)
 
 on:
   workflow_dispatch:
@@ -10,6 +10,18 @@ on:
         type: choice
         options: [patch, minor, major]
         default: patch
+      channel:
+        description: 'Release channel'
+        required: true
+        type: choice
+        options: [rc, stable]
+        default: stable
+
+# Serialize calculation as well as publication across all dispatch refs/channels.
+# GitHub may replace an older pending run; this is not a FIFO queue.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -29,31 +41,20 @@ jobs:
 
       - name: Calculate next version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
-          latest_tag="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
-          if [ -z "$latest_tag" ]; then
-            latest_tag="v0.0.0"
-          fi
-          latest="${latest_tag#v}"
-
-          IFS='.' read -r major minor patch <<< "$latest"
-
-          case "${{ inputs.bump }}" in
-            major) major=$((major + 1)); minor=0; patch=0 ;;
-            minor) minor=$((minor + 1)); patch=0 ;;
-            patch) patch=$((patch + 1)) ;;
-          esac
-
-          new_version="v${major}.${minor}.${patch}"
+          new_version="$(bash scripts/release-version.sh "$BUMP" "$CHANNEL")"
           echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
-          printf 'Next version: %s (bumping %s from %s)\n' "$new_version" "${{ inputs.bump }}" "$latest_tag"
+          printf 'Next version: %s (%s, %s bump)\n' "$new_version" "$CHANNEL" "$BUMP"
 
           {
             printf '## 🚀 Release Version\n\n'
             printf '| Field | Value |\n'
             printf '|-------|-------|\n'
-            printf '| Previous | `%s` |\n' "$latest_tag"
-            printf '| Bump type | `%s` |\n' "${{ inputs.bump }}"
+            printf '| Channel | `%s` |\n' "$CHANNEL"
+            printf '| Bump type | `%s` |\n' "$BUMP"
             printf '| **New version** | **`%s`** |\n' "$new_version"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -64,6 +65,7 @@ jobs:
     environment: release
     env:
       NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+      CHANNEL: ${{ inputs.channel }}
 
     steps:
       - name: Checkout
@@ -80,15 +82,11 @@ jobs:
       - name: Setup cosign
         uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Tag release
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
-          git push origin "${NEW_VERSION}"
-
       - name: Verify
         run: make verify VERSION="${NEW_VERSION}"
+
+      - name: Race tests
+        run: make test-race
 
       - name: Build release binaries
         run: make clean build-all VERSION="${NEW_VERSION}"
@@ -114,6 +112,13 @@ jobs:
             --bundle bin/checksums.txt.sigstore.json \
             bin/checksums.txt
 
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+          git push origin "${NEW_VERSION}"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,10 +130,16 @@ jobs:
               bin/checksums.txt.sigstore.json \
               --clobber
           else
+            release_flags=(--latest)
+            if [ "$CHANNEL" = rc ]; then
+              release_flags=(--prerelease --latest=false)
+            fi
             gh release create "${NEW_VERSION}" \
               bin/rdtui-* \
               bin/checksums.txt \
               bin/checksums.txt.sigstore.json \
+              --verify-tag \
+              "${release_flags[@]}" \
               --title "${NEW_VERSION}" \
               --notes "Release ${NEW_VERSION}"
           fi
