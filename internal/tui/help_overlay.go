@@ -90,6 +90,10 @@ func renderHelpOverlay(m Model) string {
 
 func helpOverlayTitle(m Model) string {
 	switch m.mode {
+	case modeSort:
+		return headStyle.Render("◆ Sort Shortcuts")
+	case modeQuitConfirm:
+		return headStyle.Render("◆ Quit Shortcuts")
 	case modeDetail:
 		return headStyle.Render("◆ Detail Shortcuts")
 	case modeDownload:

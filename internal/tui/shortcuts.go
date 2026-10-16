@@ -258,6 +258,9 @@ func globalShortcutDefs(m Model, includeHelpToggle bool) []shortcutDef {
 	defs := []shortcutDef{}
 	if activityBase(m.mode) {
 		defs = append(defs, shortcut(actionOpenActivity, shortcutGroupNavigation, 0, []string{"f6"}, "F6", "activity"))
+		if m.mode != modeSearch {
+			defs = append(defs, shortcut(actionQuit, shortcutGroupGlobal, 130, []string{"q"}, "q", "quit"))
+		}
 	}
 	if includeHelpToggle && m.canShowHelp() {
 		defs = append(defs, shortcut(actionToggleHelp, shortcutGroupGlobal, 100, []string{"?"}, "?", "help"))

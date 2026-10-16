@@ -121,6 +121,8 @@ type Model struct {
 	helpVisible        bool
 	helpOffset         int
 	activityReturnMode mode
+	quitReturnMode     mode
+	sortCursor         int
 	flash              flashState
 }
 
@@ -562,14 +564,15 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionOpenActivity:
 		return m.openActivity()
 	case actionQuit:
-		if m.mode == modeMain && m.filterApplied {
-			m.filterApplied = false
-			m.filteredTorrents = nil
-			m.selectedIdx = 0
+		if m.hasActiveWork() {
+			m.quitReturnMode = m.mode
+			m.mode = modeQuitConfirm
 			return m, nil
 		}
 		m.runtime.Stop()
 		return m, tea.Quit
+	case actionPageUp, actionPageDown, actionFirst, actionLast, actionMainEscape, actionOpenSort, actionSortUp, actionSortDown, actionSortApply, actionSortCancel, actionQuitConfirm, actionQuitCancel:
+		return m.navigationAction(action)
 	case actionMoveUp:
 		return m.handleMove(-1)
 	case actionMoveDown:
@@ -703,11 +706,7 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		}
 		return m, nil
 	case actionSearchCancel:
-		m.searchInput.Blur()
-		m.searchInput.Reset()
-		m.filterApplied = false
-		m.filteredTorrents = nil
-		m.selectedIdx = 0
+		m.clearTorrentFilter()
 		m.mode = modeMain
 		return m, nil
 	case actionSearchConfirm:
@@ -863,14 +862,7 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeMain, modeSearch:
-		newIdx := m.selectedIdx + delta
-		vis := m.visibleTorrents()
-		if newIdx < 0 || newIdx >= len(vis) {
-			return m, nil
-		}
-		m.selectedIdx = newIdx
-		cmd := m.requestDetail(m.selectedTorrentID())
-		return m, cmd
+		return m.moveTorrentCursor(m.selectedIdx + delta)
 	case modeFileBrowser:
 		if m.browser.EditingPath {
 			m.browser.moveEditCursor(delta)

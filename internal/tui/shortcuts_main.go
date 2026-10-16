@@ -33,6 +33,12 @@ func subcontextShortcutDefs(m Model) []shortcutDef {
 
 func mainShortcutDefs(m Model) []shortcutDef {
 	defs := []shortcutDef{
+		shortcut(actionPageUp, shortcutGroupNavigation, 13, []string{"pgup"}, "pgup", "page up").withFooter(false),
+		shortcut(actionPageDown, shortcutGroupNavigation, 14, []string{"pgdown"}, "pgdown", "page down").withFooter(false),
+		shortcut(actionFirst, shortcutGroupNavigation, 15, []string{"home"}, "home", "first").withFooter(false),
+		shortcut(actionLast, shortcutGroupNavigation, 16, []string{"end"}, "end", "last").withFooter(false),
+		shortcut(actionMainEscape, shortcutGroupNavigation, 17, []string{"esc"}, "esc", "clear filter").whenVisible(func(m Model) bool { return m.filterApplied && !m.batchMode }),
+		shortcut(actionOpenSort, shortcutGroupSort, 139, []string{"o"}, "o", "order"),
 		shortcut(actionMoveUp, shortcutGroupNavigation, 10, []string{"up", "k"}, "↑/k", "up").hiddenFromHelp().withFooter(false),
 		shortcut(actionMoveDown, shortcutGroupNavigation, 11, []string{"down", "j"}, "↓/j", "down").hiddenFromHelp().withFooter(false),
 		helpOnlyShortcut(shortcutGroupNavigation, 12, "↑↓ j/k", "move").withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode && !m.filterApplied }),
@@ -56,18 +62,15 @@ func mainShortcutDefs(m Model) []shortcutDef {
 		shortcut(actionSortName, shortcutGroupSort, 144, []string{"N"}, "N", "name").hiddenFromHelp().withFooter(false),
 		helpOnlyShortcut(shortcutGroupSort, 145, "S/P/Z/D/N", "sort").withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode }),
 	}
-	if m.filterApplied {
-		for i := range defs {
-			if defs[i].action == actionQuit {
-				defs[i].binding.SetHelp("q", "clear filter")
-			}
-		}
-	}
 	return defs
 }
 
 func searchShortcutDefs() []shortcutDef {
 	return []shortcutDef{
+		shortcut(actionPageUp, shortcutGroupNavigation, 13, []string{"pgup"}, "pgup", "page up"),
+		shortcut(actionPageDown, shortcutGroupNavigation, 14, []string{"pgdown"}, "pgdown", "page down"),
+		shortcut(actionFirst, shortcutGroupNavigation, 15, []string{"home"}, "home", "first"),
+		shortcut(actionLast, shortcutGroupNavigation, 16, []string{"end"}, "end", "last"),
 		shortcut(actionSearchCancel, shortcutGroupNavigation, 0, []string{"esc"}, "esc", "clear"),
 		shortcut(actionSearchConfirm, shortcutGroupNavigation, 1, []string{"enter"}, "enter", "keep"),
 		shortcut(actionMoveUp, shortcutGroupNavigation, 2, []string{"up"}, "↑", "up"),

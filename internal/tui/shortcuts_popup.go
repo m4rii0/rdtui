@@ -2,6 +2,18 @@ package tui
 
 func overlayShortcutDefs(m Model) []shortcutDef {
 	switch m.mode {
+	case modeSort:
+		return []shortcutDef{
+			shortcut(actionSortUp, shortcutGroupNavigation, 0, []string{"up", "k"}, "↑/k", "up"),
+			shortcut(actionSortDown, shortcutGroupNavigation, 1, []string{"down", "j"}, "↓/j", "down"),
+			shortcut(actionSortApply, shortcutGroupActions, 2, []string{"enter"}, "enter", "apply"),
+			shortcut(actionSortCancel, shortcutGroupNavigation, 3, []string{"esc"}, "esc", "cancel"),
+		}
+	case modeQuitConfirm:
+		return []shortcutDef{
+			shortcut(actionQuitConfirm, shortcutGroupActions, 0, []string{"y"}, "y", "quit"),
+			shortcut(actionQuitCancel, shortcutGroupNavigation, 1, []string{"n", "enter", "esc"}, "n/enter/esc", "stay"),
+		}
 	case modeSelectFiles:
 		return selectFilesShortcutDefs()
 	case modeDelete:
