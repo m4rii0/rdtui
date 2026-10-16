@@ -198,7 +198,7 @@ func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices [
 				value = selectedStyle.Render(value)
 			}
 		}
-		cells[i] = padVisual(value, col.Width, col.AlignRight)
+		cells[i] = padVisual(oneLine(value, col.Width), col.Width, col.AlignRight)
 	}
 	return strings.Join(cells, " ")
 }

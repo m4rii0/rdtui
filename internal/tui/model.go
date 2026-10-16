@@ -980,7 +980,7 @@ func (m Model) handleDownloadAction() (tea.Model, tea.Cmd) {
 			}
 			return m.beginBulkDownloadSetup()
 		}
-		if m.detail != nil && m.detail.Status == "downloaded" {
+		if m.detail != nil && m.detail.ID == m.selectedTorrentID() && m.detail.Status == "downloaded" {
 			m.returnMode = modeMain
 			return m.beginHandoff(handoffDownload)
 		}

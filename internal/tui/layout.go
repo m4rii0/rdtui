@@ -43,11 +43,26 @@ func boundView(view string, width, height int) string {
 
 func renderCompactMain(m Model) string {
 	lines := []string{}
-	if id := m.selectedTorrentID(); id != "" {
+	switch {
+	case m.mode == modeDetail && m.detail != nil:
+		lines = append(lines, statusLabelForSearch(m.detail.Status)+" "+m.detail.Filename)
+	case m.mode == modeDownload && m.download != nil:
+		lines = append(lines, string(m.download.Status)+" "+m.download.Filename)
+	case m.mode == modeBulkDownload:
+		if m.bulk != nil && m.bulk.currentItem() != nil {
+			item := m.bulk.currentItem()
+			lines = append(lines, string(item.Status)+" "+bulkItemLabel(*item))
+		} else {
+			lines = append(lines, "Queue waiting")
+		}
+	case m.selectedTorrentID() != "":
 		t := m.visibleTorrents()[m.selectedIdx]
 		lines = append(lines, statusLabelForSearch(t.Status)+" "+t.Filename)
-	} else {
+	default:
 		lines = append(lines, "No torrents")
+	}
+	for i := range lines {
+		lines[i] = oneLine(lines[i], m.width)
 	}
 	lines = append(lines, "F6 activity · ? help · ↑↓ move", renderActivity(m, m.width), renderFeedback(m, m.width))
 	return boundView(strings.Join(lines, "\n"), m.width, m.height)

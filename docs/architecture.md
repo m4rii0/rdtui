@@ -264,6 +264,9 @@ prior base screen with a dedicated context. `navigation.go` owns page movement,
 ordering and the quit dialog. Quit context is separate from popup/download return
 destinations. No render path starts work or performs network I/O. Standalone
 download observation continues outside the progress screen at the existing cadence.
+Queue observations update the screen beneath a quit confirmation without replacing
+that confirmation. Canceling quit reveals any newly pending overwrite decision;
+the cancellation key can never double as authorization for that decision.
 
 List columns adapt at 40/60/80 usable cells after marking/scrollbar space. Stable
 column indices keep hidden fields sortable and searchable. Help is viewport-bounded

@@ -23,10 +23,10 @@ func renderView(m Model) string {
 		bg := appStyle.Render(renderBackground(m))
 		return boundView(renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height), m.width, m.height)
 	}
-	if (m.mode == modeMain || m.mode == modeSearch) && ((m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12)) {
+	if activityBase(m.mode) && ((m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12)) {
 		return renderCompactMain(m)
 	}
-	return appStyle.Render(renderBackground(m))
+	return boundView(appStyle.Render(renderBackground(m)), m.width, m.height)
 }
 
 func username(m Model) string {

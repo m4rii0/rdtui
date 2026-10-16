@@ -41,7 +41,7 @@ func mainShortcutDefs(m Model) []shortcutDef {
 		shortcut(actionOpenSort, shortcutGroupSort, 139, []string{"o"}, "o", "order"),
 		shortcut(actionMoveUp, shortcutGroupNavigation, 10, []string{"up", "k"}, "↑/k", "up").hiddenFromHelp().withFooter(false),
 		shortcut(actionMoveDown, shortcutGroupNavigation, 11, []string{"down", "j"}, "↓/j", "down").hiddenFromHelp().withFooter(false),
-		helpOnlyShortcut(shortcutGroupNavigation, 12, "↑↓ j/k", "move").withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode && !m.filterApplied }),
+		helpOnlyShortcut(shortcutGroupNavigation, 12, "↑↓ j/k", "move").withFooterWhen(func(m Model) bool { return m.mode == modeMain }),
 		shortcut(actionOpenDetail, shortcutGroupNavigation, 20, []string{"enter"}, "enter", "details").whenVisible(func(m Model) bool { return len(m.visibleTorrents()) > 0 }).withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode }),
 		shortcut(actionOpenSearch, shortcutGroupNavigation, 30, []string{"/"}, "/", "search").withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode }),
 		shortcut(actionRefresh, shortcutGroupActions, 40, []string{"r"}, "r", "refresh").withFooterWhen(func(m Model) bool { return m.mode == modeMain && !m.batchMode }),

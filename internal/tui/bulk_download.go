@@ -134,6 +134,21 @@ func (m Model) acceptsBulkSnapshot(msg bulkSnapshotMsg) bool {
 }
 
 func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
+	// Queue observations may discover a decision while the user is answering
+	// quit. Apply them to its underlying screen without reinterpreting the
+	// user's next safe-cancel key as an overwrite confirmation.
+	if m.mode == modeQuitConfirm {
+		m.mode = m.quitReturnMode
+		updated, cmd := m.applyBulkSnapshot(msg)
+		result := updated.(Model)
+		result.quitReturnMode = result.mode
+		result.mode = modeQuitConfirm
+		return result, cmd
+	}
+	return m.applyBulkSnapshot(msg)
+}
+
+func (m Model) applyBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 	if !m.acceptsBulkSnapshot(msg) {
 		return m, nil
 	}

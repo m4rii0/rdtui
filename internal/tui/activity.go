@@ -50,10 +50,11 @@ func renderActivity(m Model, width int) string {
 		case s.CurrentIndex >= 0 && s.CurrentIndex < len(s.Items):
 			item := s.Items[s.CurrentIndex]
 			label := bulkItemLabel(bulkQueueItem{Target: item.Item.Target, TorrentName: item.Item.TorrentName})
-			text = fmt.Sprintf("Queue %d/%d · %s · %s", s.CurrentIndex+1, len(s.Items), item.Status, label)
+			status := string(item.Status)
 			if item.Status == app.QueueItemActive && s.Download != nil {
-				text += " · " + activityDownloadStats(s.Download.Download.Status, s.Download.Download.Progress(), s.Download.Download.DownloadSpeed, s.Download.Download.TotalLength)
+				status = activityDownloadStats(s.Download.Download.Status, s.Download.Download.Progress(), s.Download.Download.DownloadSpeed, s.Download.Download.TotalLength)
 			}
+			text = fmt.Sprintf("Queue %d/%d · %s · %s", s.CurrentIndex+1, len(s.Items), status, label)
 		default:
 			text = "Queue waiting"
 		}
@@ -95,12 +96,18 @@ func (m Model) openActivity() (tea.Model, tea.Cmd) {
 func activityFooter(m Model, width int) string {
 	defs := m.renderShortcutDefs()
 	filtered := make([]shortcutDef, 0, len(defs))
+	prefix := "F6 activity · ? help"
+	list := m.mode == modeMain || m.mode == modeSearch
+	if list {
+		prefix += " · ↑↓ move"
+	}
 	for _, def := range defs {
-		if def.action != actionOpenActivity && def.action != actionToggleHelp {
+		movement := list && (def.action == actionMoveUp || def.action == actionMoveDown || (def.action == "" && def.binding.Help().Desc == "move"))
+		if def.action != actionOpenActivity && def.action != actionToggleHelp && !movement {
 			filtered = append(filtered, def)
 		}
 	}
-	return oneLine("F6 activity · ? help · "+renderShortcutFooter(filtered, m), width)
+	return oneLine(prefix+" · "+renderShortcutFooter(filtered, m), width)
 }
 
 func finishWorkbench(m Model, lines []string, width int) string {
