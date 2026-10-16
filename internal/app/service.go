@@ -25,6 +25,7 @@ type Service struct {
 	client    *realdebrid.Client
 	session   *models.AuthSession
 	downloads *DownloadCoordinator
+	runtime   *Runtime
 }
 
 func New(parent context.Context) (*Service, error) {
@@ -44,9 +45,19 @@ func New(parent context.Context) (*Service, error) {
 		return nil, err
 	}
 	cfg := prefs.Effective()
+	runtime := NewRuntime(parent)
+	manager := auth.NewManager(auth.SessionDependencies{
+		Root: runtime.Context(), Spawn: runtime.Spawn,
+		OAuth: realdebrid.NewClient("", cfg.APIBaseURL, cfg.OAuthBaseURL),
+		Validate: func(ctx context.Context, token string) (models.User, error) {
+			return realdebrid.NewClient(token, cfg.APIBaseURL, cfg.OAuthBaseURL).User(ctx)
+		},
+		Credentials: store, Preferences: prefs, Now: time.Now,
+	})
 	return &Service{
 		prefs:     prefs,
-		auth:      auth.NewManager(store, prefs),
+		auth:      manager,
+		runtime:   runtime,
 		downloads: NewDownloadCoordinator(parent, newDownloadManager(cfg), cfg.DefaultDownloadDir),
 	}, nil
 }
@@ -80,7 +91,7 @@ func (s *Service) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
 }
 
 func (s *Service) AuthenticateWithToken(ctx context.Context, token string, persist bool) (*models.AuthSession, error) {
-	session, err := s.auth.ValidateAndPersistToken(ctx, token, persist)
+	session, err := s.auth.AuthenticateWithToken(ctx, token, persist)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +290,11 @@ func (s *Service) Close() error {
 
 // CloseContext lets composition share its cleanup budget with runtime draining.
 func (s *Service) CloseContext(ctx context.Context) error {
-	return s.downloads.Close(ctx)
+	if s.runtime == nil {
+		return s.downloads.Close(ctx)
+	}
+	s.runtime.Stop()
+	return errors.Join(s.downloads.Close(ctx), s.runtime.Wait(ctx))
 }
 
 func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
