@@ -196,6 +196,48 @@ func TestBatchCancelStopsRequests(t *testing.T) {
 	})
 }
 
+func TestBatchCopyCancellationAfterFinalResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		links []string
+	}{
+		{name: "single item", links: []string{"one"}},
+		{name: "final item", links: []string{"one", "two"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			calls, clipboardCalls := 0, 0
+			service := NewBatchService(batchAPIStub{link: func(_ context.Context, link string) (models.UnrestrictedLink, error) {
+				calls++
+				if calls == len(tc.links) {
+					cancel()
+				}
+				return models.UnrestrictedLink{Download: "url:" + link}, nil
+			}}, batchDesktopStub{copy: func(string) (bool, error) {
+				clipboardCalls++
+				return true, nil
+			}}, noBatchWait)
+			requests := make([]LinkRequest, len(tc.links))
+			for i, link := range tc.links {
+				requests[i] = LinkRequest{TorrentID: "torrent", Target: models.DownloadTarget{Index: i, Link: link}, Eligible: true}
+			}
+			result := service.CopyLinks(ctx, requests)
+			if clipboardCalls != 0 || result.CopiedURLs != 0 || !errors.Is(result.Err, context.Canceled) {
+				t.Fatalf("clipboard calls=%d result=%+v", clipboardCalls, result)
+			}
+			if calls != len(tc.links) || len(result.Items) != len(tc.links) || len(result.ResolvedURLs) != len(tc.links) {
+				t.Fatalf("calls=%d result=%+v", calls, result)
+			}
+			for i, item := range result.Items {
+				if item.Kind != OutcomeSuccess || item.Err != nil || item.RemoteOutcomeUnknown || item.URL != "url:"+tc.links[i] || result.ResolvedURLs[i] != "url:"+tc.links[i] {
+					t.Fatalf("lost successful resolution: %+v", result)
+				}
+			}
+		})
+	}
+}
+
 func TestCanceledMutationOutcomeUnknown(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

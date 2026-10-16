@@ -208,6 +208,12 @@ func (s *BatchService) CopyLinks(ctx context.Context, requests []LinkRequest) Li
 	if len(result.ResolvedURLs) == 0 || result.Err != nil {
 		return result
 	}
+	// The final request can succeed even as its context is canceled, leaving
+	// no next loop iteration to observe cancellation before desktop work.
+	if err := ctx.Err(); err != nil {
+		result.Err = err
+		return result
+	}
 	if s.desktop == nil {
 		result.ClipboardErr = errors.New("clipboard not available")
 		return result
