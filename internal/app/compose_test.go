@@ -275,6 +275,101 @@ type closingBackend struct {
 	shutdown func(context.Context) error
 }
 
+// These acceptance tests keep composition real: omitting the runtime-owned
+// refresh worker or detaching an overwrite wait would prevent Close from draining.
+func TestApplicationCloseDuringRefresh(t *testing.T) {
+	f := newCompositionFixture(t)
+	now := time.Unix(f.clock.Load(), 0)
+	creds := models.DeviceCredentials{ClientID: "client", ClientSecret: "secret", AccessToken: "old-token", RefreshToken: "refresh", ExpiresAt: now.Add(2 * time.Minute)}
+	if err := f.options.Store.SaveDeviceCredentials(creds); err != nil {
+		t.Fatal(err)
+	}
+	transport := f.options.HTTPClient.Transport
+	entered, canceled := make(chan struct{}), make(chan struct{})
+	f.options.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/token" {
+			close(entered)
+			<-r.Context().Done()
+			close(canceled)
+			return nil, r.Context().Err()
+		}
+		return transport.RoundTrip(r)
+	})
+	a := newTestApplication(t, f.options)
+	if _, err := a.Auth.Bootstrap(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Store(now.Add(90 * time.Second).Unix())
+	result := make(chan error, 1)
+	if err := a.Runtime.Spawn(t.Context(), func(ctx context.Context) {
+		_, err := a.Torrents.ListTorrents(ctx)
+		result <- err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	receive(t, entered)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	receive(t, canceled)
+	if err := receive(t, result); !errors.Is(err, context.Canceled) {
+		t.Fatalf("request survived shutdown: %v", err)
+	}
+	saved, err := f.options.Store.LoadDeviceCredentials()
+	if err != nil || *saved != creds {
+		t.Fatalf("interrupted refresh changed durable credentials: %+v %v", saved, err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.headers["/torrents"]) != 0 || f.external.Load() != 0 {
+		t.Fatalf("request escaped canceled refresh: %v external=%d", f.headers, f.external.Load())
+	}
+}
+
+func TestApplicationCloseDuringOverwrite(t *testing.T) {
+	f := newCompositionFixture(t)
+	f.options.Stat = func(string) (int64, bool, error) { return 17, true, nil }
+	f.options.BackendFactory = func(context.Context, config.EffectiveConfig) (download.Backend, error) {
+		return &fakeDownloadManager{startDownload: func(context.Context, models.ManagedDownloadRequest) (models.ManagedDownload, error) {
+			t.Error("started a transfer without overwrite approval")
+			return models.ManagedDownload{}, errors.New("unexpected start")
+		}}, nil
+	}
+	a := newTestApplication(t, f.options)
+	if _, err := a.Auth.AuthenticateWithToken(t.Context(), "private", false); err != nil {
+		t.Fatal(err)
+	}
+	id, err := a.Bulk.Start(t.Context(), queuePlan(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueSnapshot(t, a.Bulk, id, func(s QueueSnapshot) bool { return s.AwaitingOverwrite })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := a.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := a.Bulk.Snapshot(id)
+	if err != nil || !snapshot.Finished || snapshot.AwaitingOverwrite {
+		t.Fatalf("shutdown left an overwrite wait: %+v %v", snapshot, err)
+	}
+	for _, item := range snapshot.Items {
+		if item.Outcome == nil || item.Outcome.Kind != OutcomeCanceled {
+			t.Fatalf("shutdown lost canceled outcome: %+v", item)
+		}
+	}
+	if err := a.Bulk.Decide(t.Context(), QueueDecision{QueueID: id, ItemIndex: 0, Overwrite: true}); !errors.Is(err, ErrStaleQueue) {
+		t.Fatalf("accepted late approval: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.headers["/unrestrict/link"]) != 1 || f.external.Load() != 0 {
+		t.Fatalf("shutdown advanced queue: %v external=%d", f.headers, f.external.Load())
+	}
+}
+
 func (b *closingBackend) Shutdown(ctx context.Context) error { return b.shutdown(ctx) }
 
 func TestApplicationCloseCancelsBeforeDraining(t *testing.T) {
