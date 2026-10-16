@@ -1,7 +1,6 @@
 package update
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,7 +16,7 @@ func TestInstallUnixSuccess(t *testing.T) {
 	target := filepath.Join(dir, "rdtui")
 	writeScript(t, target, "rdtui v1.0.0")
 
-	res, err := Install(context.Background(), scriptBytes("rdtui v1.2.0"), InstallOptions{
+	res, err := Install(t.Context(), scriptBytes("rdtui v1.2.0"), InstallOptions{
 		GOOS:    "linux",
 		ExePath: target,
 		Version: "v1.2.0",
@@ -45,7 +44,7 @@ func TestInstallUnixValidationFailureRollsBack(t *testing.T) {
 	target := filepath.Join(dir, "rdtui")
 	writeScript(t, target, "rdtui v1.0.0")
 
-	_, err := Install(context.Background(), scriptBytes("rdtui wrong"), InstallOptions{
+	_, err := Install(t.Context(), scriptBytes("rdtui wrong"), InstallOptions{
 		GOOS:    "linux",
 		ExePath: target,
 		Version: "v1.2.0",
@@ -63,7 +62,7 @@ func TestInstallUnixValidationFailureRollsBack(t *testing.T) {
 }
 
 func TestInstallInvalidTarget(t *testing.T) {
-	_, err := Install(context.Background(), []byte("asset"), InstallOptions{GOOS: "linux", ExePath: filepath.Join(t.TempDir(), "missing")})
+	_, err := Install(t.Context(), []byte("asset"), InstallOptions{GOOS: "linux", ExePath: filepath.Join(t.TempDir(), "missing")})
 	if err == nil {
 		t.Fatal("expected invalid target error")
 	}
@@ -76,7 +75,7 @@ func TestInstallWindowsWritesManualReplacement(t *testing.T) {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	res, err := Install(context.Background(), []byte("new"), InstallOptions{
+	res, err := Install(t.Context(), []byte("new"), InstallOptions{
 		GOOS:    "windows",
 		ExePath: target,
 		TempDir: filepath.Join(dir, "replacement"),

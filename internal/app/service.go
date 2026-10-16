@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -279,8 +279,8 @@ func ValidTorrentFiles(paths []string) (valid []string, invalid []string) {
 			invalid = append(invalid, clean)
 		}
 	}
-	sort.Strings(valid)
-	sort.Strings(invalid)
+	slices.Sort(valid)
+	slices.Sort(invalid)
 	return valid, invalid
 }
 

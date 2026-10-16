@@ -54,9 +54,9 @@ func TestRenderViewHeightWithManyTorrents(t *testing.T) {
 		sortColumn:    colAdded,
 		sortAscending: false,
 		session:       &models.AuthSession{User: models.User{Username: "debug"}},
-		detail:        &models.TorrentInfo{Torrent: models.Torrent{Filename: "selected torrent", Status: "downloading", Progress: 99.67}, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
+		detail:        &models.TorrentInfo{Filename: "selected torrent", Status: "downloading", Progress: 99.67, Files: []models.TorrentFile{{ID: 1, Path: "/file.mkv", Bytes: 1024}}, OriginalBytes: 1024},
 	}
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		m.torrents = append(m.torrents, models.Torrent{
 			ID:       fmt.Sprintf("id-%d", i),
 			Filename: fmt.Sprintf("torrent-%02d-with-a-rather-long-name-to-force-layout-behavior", i),
@@ -97,7 +97,7 @@ func TestLongNamesDoNotWrap(t *testing.T) {
 
 	view := renderView(m)
 	padW := appStyle.GetHorizontalFrameSize()
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		w := lipgloss.Width(line)
 		if w > m.width+padW {
 			t.Fatalf("line width %d exceeds terminal width %d (incl padding): %q", w, m.width+padW, line)
@@ -256,7 +256,7 @@ func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
 	m.input.SetValue("magnet:?xt=urn:btih:" + strings.Repeat("a", 80) + "restofthestring")
 	m.input.CursorEnd()
 
-	for _, line := range strings.Split(ansi.Strip(renderInputPopup(m, "Paste a magnet link")), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(renderInputPopup(m, "Paste a magnet link")), "\n") {
 		if strings.Contains(line, "restofthestring") && !strings.Contains(line, ">") {
 			t.Fatalf("long input wrapped away from prompt line: %q", line)
 		}
@@ -360,7 +360,7 @@ func TestRenderBulkProgressShowsMovingQueue(t *testing.T) {
 
 func TestRenderBulkQueueKeepsCurrentVisibleAndBounded(t *testing.T) {
 	bulk := newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "Movie A"}})
-	for idx := 0; idx < 12; idx++ {
+	for idx := range 12 {
 		status := bulkFilePending
 		if idx < 8 {
 			status = bulkFileSuccess

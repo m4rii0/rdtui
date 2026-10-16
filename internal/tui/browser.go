@@ -1,10 +1,11 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -109,17 +110,20 @@ func (b *fileBrowserState) readDirCmd() tea.Cmd {
 				})
 			}
 		}
-		sort.SliceStable(result, func(i, j int) bool {
-			if result[i].Name == ".." {
-				return true
+		slices.SortStableFunc(result, func(a, b browserEntry) int {
+			if a.Name == ".." && b.Name != ".." {
+				return -1
 			}
-			if result[j].Name == ".." {
-				return false
+			if b.Name == ".." && a.Name != ".." {
+				return 1
 			}
-			if result[i].IsDir != result[j].IsDir {
-				return result[i].IsDir
+			if a.IsDir != b.IsDir {
+				if a.IsDir {
+					return -1
+				}
+				return 1
 			}
-			return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+			return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 		})
 		return browserReadDirMsg{dir: dir, entries: result}
 	}
@@ -323,7 +327,7 @@ func (b *fileBrowserState) selectedPaths() []string {
 	for path := range b.Selected {
 		out = append(out, path)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -385,11 +389,14 @@ func (b *fileBrowserState) updateCompletions() {
 			FileSize: size,
 		})
 	}
-	sort.SliceStable(b.editCompletions, func(i, j int) bool {
-		if b.editCompletions[i].IsDir != b.editCompletions[j].IsDir {
-			return b.editCompletions[i].IsDir
+	slices.SortStableFunc(b.editCompletions, func(a, b browserEntry) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1
+			}
+			return 1
 		}
-		return strings.ToLower(b.editCompletions[i].Name) < strings.ToLower(b.editCompletions[j].Name)
+		return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	if b.editCursor >= len(b.editCompletions) {
 		b.editCursor = max(0, len(b.editCompletions)-1)
@@ -494,11 +501,11 @@ func (b *fileBrowserState) moveEditCursor(delta int) {
 }
 
 func splitPathInput(raw string) (dir, prefix string) {
-	idx := strings.LastIndex(raw, string(os.PathSeparator))
-	if idx < 0 {
+	dir, prefix, found := strings.CutLast(raw, string(os.PathSeparator))
+	if !found {
 		return ".", raw
 	}
-	return raw[:idx], raw[idx+1:]
+	return dir, prefix
 }
 
 func (b fileBrowserState) view(width, height int) string {
@@ -538,7 +545,7 @@ func (b fileBrowserState) view(width, height int) string {
 			}
 		}
 		thumbTop, thumbSize := scrollbarThumb(len(b.Entries), listH, start)
-		for i := 0; i < listH; i++ {
+		for i := range listH {
 			idx := start + i
 			if idx >= 0 && idx < end {
 				entry := b.Entries[idx]
@@ -624,7 +631,7 @@ func (b fileBrowserState) viewEditing(width, height int) string {
 			}
 		}
 		thumbTop, thumbSize := scrollbarThumb(len(entries), listH, start)
-		for i := 0; i < listH; i++ {
+		for i := range listH {
 			idx := start + i
 			if idx >= 0 && idx < end {
 				entry := entries[idx]

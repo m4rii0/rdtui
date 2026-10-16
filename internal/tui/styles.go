@@ -129,7 +129,7 @@ func dividerLine(width int) string {
 		width = 40
 	}
 	line := ""
-	for i := 0; i < width; i++ {
+	for range width {
 		line += "─"
 	}
 	return subtleStyle.Render(line)

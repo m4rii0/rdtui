@@ -38,7 +38,7 @@ type Client struct {
 
 type ErrorResponse struct {
 	Error     string `json:"error"`
-	ErrorCode int    `json:"error_code,omitempty"`
+	ErrorCode int    `json:"error_code,omitzero"`
 }
 
 type apiError struct {
@@ -150,19 +150,17 @@ func (c *Client) TorrentInfo(ctx context.Context, id string) (models.TorrentInfo
 		return models.TorrentInfo{}, err
 	}
 	out := models.TorrentInfo{
-		Torrent: models.Torrent{
-			ID:       raw.ID,
-			Filename: raw.Filename,
-			Hash:     raw.Hash,
-			Bytes:    raw.Bytes,
-			Host:     raw.Host,
-			Split:    raw.Split,
-			Progress: raw.Progress,
-			Status:   raw.Status,
-			Added:    parseTime(raw.Added),
-			Ended:    parseTime(raw.Ended),
-			Links:    raw.Links,
-		},
+		ID:               raw.ID,
+		Filename:         raw.Filename,
+		Hash:             raw.Hash,
+		Bytes:            raw.Bytes,
+		Host:             raw.Host,
+		Split:            raw.Split,
+		Progress:         raw.Progress,
+		Status:           raw.Status,
+		Added:            parseTime(raw.Added),
+		Ended:            parseTime(raw.Ended),
+		Links:            raw.Links,
 		OriginalFilename: raw.OriginalFilename,
 		OriginalBytes:    raw.OriginalBytes,
 		Seeders:          raw.Seeders,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -386,7 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		selectedID := m.selectedTorrentID()
-		m.torrents = append([]models.Torrent(nil), msg.torrents...)
+		m.torrents = slices.Clone(msg.torrents)
 		sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
 		if m.filterApplied || m.mode == modeSearch {
 			m.applyFilter()
@@ -1830,7 +1831,7 @@ func bulkDetailsCmd(service app.AppService, plans []bulkTorrentPlan) tea.Cmd {
 	if len(plans) == 0 {
 		return nil
 	}
-	ordered := append([]bulkTorrentPlan(nil), plans...)
+	ordered := slices.Clone(plans)
 	return func() tea.Msg {
 		details := make([]models.TorrentInfo, 0, len(ordered))
 		for _, plan := range ordered {
@@ -2119,9 +2120,9 @@ func userHomeDir() string {
 }
 
 func filepathBase(path string) string {
-	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
-	if len(parts) == 0 {
-		return path
+	normalized := strings.ReplaceAll(path, "\\", "/")
+	if _, base, found := strings.CutLast(normalized, "/"); found {
+		return base
 	}
-	return parts[len(parts)-1]
+	return normalized
 }

@@ -47,7 +47,7 @@ func TestStartManagedDownloadUsesConfiguredDirAndFilename(t *testing.T) {
 
 	svc := &Service{config: config.Config{DefaultDownloadDir: "/tmp/downloads"}, downloader: fake}
 
-	started, err := svc.StartManagedDownload(context.Background(), "https://example.com/file.zip", "")
+	started, err := svc.StartManagedDownload(t.Context(), "https://example.com/file.zip", "")
 	if err != nil {
 		t.Fatalf("StartManagedDownload() error = %v", err)
 	}
@@ -73,7 +73,7 @@ func TestStartManagedDownloadReusesActiveSession(t *testing.T) {
 		},
 	}
 
-	started, err := svc.StartManagedDownload(context.Background(), "https://example.com/other.zip", "other.zip")
+	started, err := svc.StartManagedDownload(t.Context(), "https://example.com/other.zip", "other.zip")
 	if err != nil {
 		t.Fatalf("StartManagedDownload() error = %v", err)
 	}
@@ -105,7 +105,7 @@ func TestManagedDownloadStatusPreservesCachedMetadata(t *testing.T) {
 		},
 	}
 
-	status, ok, err := svc.ManagedDownloadStatus(context.Background())
+	status, ok, err := svc.ManagedDownloadStatus(t.Context())
 	if err != nil {
 		t.Fatalf("ManagedDownloadStatus() error = %v", err)
 	}

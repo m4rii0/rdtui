@@ -1,7 +1,6 @@
 package update
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,7 +21,7 @@ func TestLatestReleaseParsesResponse(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{HTTPClient: server.Client(), BaseURL: server.URL}
-	release, err := client.LatestRelease(context.Background())
+	release, err := client.LatestRelease(t.Context())
 	if err != nil {
 		t.Fatalf("LatestRelease returned error: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestDownloadReturnsBytes(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{HTTPClient: server.Client()}
-	data, err := client.Download(context.Background(), server.URL)
+	data, err := client.Download(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("Download returned error: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,57 @@ func TestSortTorrentsAddedNewestFirst(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("sorted ids = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestSortTorrentsPreservesTieBreakers(t *testing.T) {
+	older := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	newer := older.Add(24 * time.Hour)
+	input := []models.Torrent{
+		{ID: "older", Filename: "a", Bytes: 10, Added: older},
+		{ID: "tie-first", Filename: "b", Bytes: 10, Added: newer},
+		{ID: "newer-z", Filename: "z", Bytes: 10, Added: newer},
+		{ID: "tie-second", Filename: "b", Bytes: 10, Added: newer},
+		{ID: "newer-a", Filename: "a", Bytes: 10, Added: newer},
+		{ID: "large", Bytes: 20},
+	}
+	for _, tt := range []struct {
+		name      string
+		ascending bool
+		want      []string
+	}{
+		{"ascending", true, []string{"newer-a", "tie-first", "tie-second", "newer-z", "older", "large"}},
+		{"descending", false, []string{"large", "newer-a", "tie-first", "tie-second", "newer-z", "older"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			torrents := slices.Clone(input)
+			sortTorrents(torrents, colSize, tt.ascending)
+			for i, want := range tt.want {
+				if torrents[i].ID != want {
+					t.Errorf("sorted[%d].ID = %q, want %q", i, torrents[i].ID, want)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyFilterCopiesUnfilteredTorrents(t *testing.T) {
+	m := NewModel(nil)
+	m.sortColumn = colName
+	m.sortAscending = true
+	m.torrents = []models.Torrent{{ID: "b", Filename: "b"}, {ID: "a", Filename: "a"}}
+	m.applyFilter()
+	if m.filteredTorrents[0].ID != "a" || m.torrents[0].ID != "b" {
+		t.Fatal("filtering should sort the copy without reordering the source")
+	}
+	m.filteredTorrents[0].Filename = "changed"
+	if m.torrents[1].Filename != "a" {
+		t.Fatal("filtered torrents share storage with the source")
+	}
+	m.torrents = nil
+	m.applyFilter()
+	if m.filteredTorrents != nil {
+		t.Fatal("filtering nil torrents should preserve nil")
 	}
 }
 
@@ -137,7 +189,7 @@ func TestSelectedTorrentIDSurvivesRefresh(t *testing.T) {
 		{ID: "a", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
 		{ID: "b", Added: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)},
 	}
-	m.torrents = append([]models.Torrent(nil), newTorrents...)
+	m.torrents = slices.Clone(newTorrents)
 	sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
 	m.selectedIdx = selectedIndexForID(m.torrents, originalID)
 
@@ -266,7 +318,7 @@ func TestCanSelectFilesIncludesMagnetConversion(t *testing.T) {
 		t.Fatal("expected magnet_conversion to allow file selection from list")
 	}
 
-	m.detail = &models.TorrentInfo{Torrent: models.Torrent{ID: "a", Status: "magnet_conversion"}}
+	m.detail = &models.TorrentInfo{ID: "a", Status: "magnet_conversion"}
 	if !m.canSelectFilesFromDetail() {
 		t.Fatal("expected magnet_conversion to allow file selection from detail")
 	}
@@ -320,7 +372,7 @@ func TestEnterWithCachedDetail(t *testing.T) {
 			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
 		},
 		selectedIdx: 0,
-		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a"}},
+		detail:      &models.TorrentInfo{ID: "a"},
 	}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -393,7 +445,7 @@ func TestDeleteFromMainView(t *testing.T) {
 			{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
 		},
 		selectedIdx: 0,
-		detail:      &models.TorrentInfo{Torrent: models.Torrent{ID: "a", Filename: "test"}},
+		detail:      &models.TorrentInfo{ID: "a", Filename: "test"},
 	}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
@@ -415,8 +467,8 @@ func TestDownloadFromMainViewStartsDirectlyForSingleTarget(t *testing.T) {
 		},
 		selectedIdx: 0,
 		detail: &models.TorrentInfo{
-			Torrent: models.Torrent{ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"}},
-			Files:   []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
+			ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"},
+			Files: []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
 		},
 	}
 
@@ -438,8 +490,8 @@ func TestDownloadFromDetailViewStartsDirectlyForSingleTarget(t *testing.T) {
 		mode:       modeDetail,
 		returnMode: modeDetail,
 		detail: &models.TorrentInfo{
-			Torrent: models.Torrent{ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"}},
-			Files:   []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
+			ID: "a", Filename: "movie", Status: "downloaded", Links: []string{"https://example.com/link"},
+			Files: []models.TorrentFile{{ID: 1, Path: "/movie.mkv", Selected: true}},
 		},
 	}
 
@@ -913,8 +965,8 @@ func TestBulkFileChoiceRejectsEmptyAndBuildsConfirmation(t *testing.T) {
 	}
 
 	updated, _ := m.Update(bulkDetailsMsg{details: []models.TorrentInfo{
-		{Torrent: models.Torrent{ID: "a", Filename: "single", Links: []string{"https://example.com/a"}}, Files: []models.TorrentFile{{ID: 1, Path: "a.mkv", Selected: true}}},
-		{Torrent: models.Torrent{ID: "b", Filename: "multi", Links: []string{"https://example.com/b1", "https://example.com/b2"}}, Files: []models.TorrentFile{{ID: 1, Path: "b1.mkv", Selected: true}, {ID: 2, Path: "b2.mkv", Selected: true}}},
+		{ID: "a", Filename: "single", Links: []string{"https://example.com/a"}, Files: []models.TorrentFile{{ID: 1, Path: "a.mkv", Selected: true}}},
+		{ID: "b", Filename: "multi", Links: []string{"https://example.com/b1", "https://example.com/b2"}, Files: []models.TorrentFile{{ID: 1, Path: "b1.mkv", Selected: true}, {ID: 2, Path: "b2.mkv", Selected: true}}},
 	}})
 	m = updated.(Model)
 	if m.mode != modeBulkFiles {
@@ -1199,7 +1251,7 @@ func TestBulkSelectFilesDetailsDefaultAndEmptySelectionValidation(t *testing.T) 
 	}
 
 	updated, _ := m.Update(bulkFileSelectionDetailsMsg{details: []models.TorrentInfo{{
-		Torrent: models.Torrent{ID: "a", Filename: "alpha"},
+		ID: "a", Filename: "alpha",
 		Files: []models.TorrentFile{
 			{ID: 1, Path: "small.mkv", Bytes: 100},
 			{ID: 2, Path: "large.mkv", Bytes: 200},
@@ -1338,7 +1390,7 @@ func (s *bulkFileSelectionTestService) SelectFiles(_ context.Context, torrentID 
 	if s.selected == nil {
 		s.selected = map[string][]int{}
 	}
-	s.selected[torrentID] = append([]int(nil), ids...)
+	s.selected[torrentID] = slices.Clone(ids)
 	return s.selectErr[torrentID]
 }
 

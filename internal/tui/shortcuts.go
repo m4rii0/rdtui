@@ -1,7 +1,8 @@
 package tui
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -204,9 +205,9 @@ func visibleShortcutDefs(m Model, defs []shortcutDef) []shortcutDef {
 }
 
 func sortShortcutDefs(defs []shortcutDef) []shortcutDef {
-	out := append([]shortcutDef(nil), defs...)
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].order < out[j].order
+	out := slices.Clone(defs)
+	slices.SortStableFunc(out, func(a, b shortcutDef) int {
+		return cmp.Compare(a.order, b.order)
 	})
 	return out
 }

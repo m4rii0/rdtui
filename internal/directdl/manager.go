@@ -18,7 +18,7 @@ type Manager struct {
 	mu        sync.Mutex
 	client    *http.Client
 	downloads map[string]*downloadState
-	nextID    uint64
+	nextID    atomic.Uint64
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -47,7 +47,7 @@ func (m *Manager) StartDownload(_ context.Context, req models.ManagedDownloadReq
 		return models.ManagedDownload{}, fmt.Errorf("ensure download dir: %w", err)
 	}
 
-	gid := fmt.Sprintf("direct-%d", atomic.AddUint64(&m.nextID, 1))
+	gid := fmt.Sprintf("direct-%d", m.nextID.Add(1))
 	ctx, cancel := context.WithCancel(m.ctx)
 	state := &downloadState{
 		download: models.ManagedDownload{
@@ -65,8 +65,9 @@ func (m *Manager) StartDownload(_ context.Context, req models.ManagedDownloadReq
 	m.downloads[gid] = state
 	m.mu.Unlock()
 
-	m.wg.Add(1)
-	go m.runDownload(ctx, state)
+	m.wg.Go(func() {
+		m.runDownload(ctx, state)
+	})
 
 	return state.snapshot(), nil
 }
@@ -99,8 +100,6 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 }
 
 func (m *Manager) runDownload(ctx context.Context, state *downloadState) {
-	defer m.wg.Done()
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, state.snapshot().URL, nil)
 	if err != nil {
 		state.fail(err)

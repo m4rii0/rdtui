@@ -52,7 +52,7 @@ func TestWaitForReadyRetriesUntilVersionSucceeds(t *testing.T) {
 	}
 	m.startupPollInterval = time.Millisecond
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
 	client, err := m.waitForReady(ctx, websocketURL(6800), "secret", make(chan error))
@@ -79,7 +79,7 @@ func TestWaitForReadyFailsWhenProcessExits(t *testing.T) {
 	waitDone <- errors.New("bind failed")
 	close(waitDone)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
 	_, err := m.waitForReady(ctx, websocketURL(6800), "secret", waitDone)
@@ -100,7 +100,7 @@ func TestShutdownKillsProcessAfterDeadline(t *testing.T) {
 	m.waitDone = waitDone
 	go m.watchProcess(proc, waitDone)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	defer cancel()
 
 	err := m.Shutdown(ctx)

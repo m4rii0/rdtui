@@ -1,7 +1,8 @@
 package tui
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -75,19 +76,18 @@ func columnLabel(col int) string {
 }
 
 func sortTorrents(torrents []models.Torrent, col int, ascending bool) {
-	sort.SliceStable(torrents, func(i, j int) bool {
-		a, b := torrents[i], torrents[j]
-		cmp := compareByColumn(a, b, col)
-		if cmp != 0 {
+	slices.SortStableFunc(torrents, func(a, b models.Torrent) int {
+		order := compareByColumn(a, b, col)
+		if order != 0 {
 			if ascending {
-				return cmp < 0
+				return order
 			}
-			return cmp > 0
+			return -order
 		}
-		if !a.Added.Equal(b.Added) {
-			return a.Added.After(b.Added)
+		if order := b.Added.Compare(a.Added); order != 0 {
+			return order
 		}
-		return a.Filename < b.Filename
+		return cmp.Compare(a.Filename, b.Filename)
 	})
 }
 
@@ -104,29 +104,11 @@ func compareByColumn(a, b models.Torrent, col int) int {
 		}
 		return 0
 	case colSize:
-		if a.Bytes < b.Bytes {
-			return -1
-		}
-		if a.Bytes > b.Bytes {
-			return 1
-		}
-		return 0
+		return cmp.Compare(a.Bytes, b.Bytes)
 	case colAdded:
-		if a.Added.Before(b.Added) {
-			return -1
-		}
-		if a.Added.After(b.Added) {
-			return 1
-		}
-		return 0
+		return a.Added.Compare(b.Added)
 	case colName:
-		if a.Filename < b.Filename {
-			return -1
-		}
-		if a.Filename > b.Filename {
-			return 1
-		}
-		return 0
+		return cmp.Compare(a.Filename, b.Filename)
 	default:
 		return 0
 	}
@@ -337,7 +319,7 @@ func (m Model) visibleTorrents() []models.Torrent {
 func (m *Model) applyFilter() {
 	query := m.searchInput.Value()
 	if query == "" {
-		m.filteredTorrents = append([]models.Torrent(nil), m.torrents...)
+		m.filteredTorrents = slices.Clone(m.torrents)
 		m.filterMatches = nil
 	} else {
 		results := filterTorrentsWithMatches(m.torrents, query)

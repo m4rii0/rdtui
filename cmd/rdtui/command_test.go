@@ -13,7 +13,7 @@ import (
 
 func TestCobraCommandRunTUI(t *testing.T) {
 	var called bool
-	cmd := testRootCommand(commandHandlers{
+	cmd := testRootCommand(t, commandHandlers{
 		runTUI: func() error {
 			called = true
 			return nil
@@ -30,7 +30,7 @@ func TestCobraCommandRunTUI(t *testing.T) {
 
 func TestCobraCommandVersion(t *testing.T) {
 	var stdout bytes.Buffer
-	cmd := testRootCommand(commandHandlers{
+	cmd := testRootCommand(t, commandHandlers{
 		runTUI: func() error {
 			t.Fatal("version command should not run TUI")
 			return nil
@@ -52,7 +52,7 @@ func TestCobraMousetrapDisabled(t *testing.T) {
 	t.Cleanup(func() { cobra.MousetrapHelpText = original })
 	cobra.MousetrapHelpText = "trap"
 
-	_ = testRootCommand(commandHandlers{})
+	_ = testRootCommand(t, commandHandlers{})
 
 	if cobra.MousetrapHelpText != "" {
 		t.Fatalf("MousetrapHelpText = %q, want disabled", cobra.MousetrapHelpText)
@@ -61,7 +61,7 @@ func TestCobraMousetrapDisabled(t *testing.T) {
 
 func TestCobraCommandCheckUpdate(t *testing.T) {
 	var called bool
-	cmd := testRootCommand(commandHandlers{
+	cmd := testRootCommand(t, commandHandlers{
 		checkUpdate: func(ctx context.Context, out io.Writer) error {
 			called = true
 			return nil
@@ -80,7 +80,7 @@ func TestCobraCommandCheckUpdate(t *testing.T) {
 func TestCobraCommandUpdateOptions(t *testing.T) {
 	var called bool
 	var got updateOptions
-	cmd := testRootCommand(commandHandlers{
+	cmd := testRootCommand(t, commandHandlers{
 		update: func(ctx context.Context, out io.Writer, opts updateOptions) error {
 			called = true
 			got = opts
@@ -110,7 +110,7 @@ func TestCobraCommandInvalidArguments(t *testing.T) {
 	}
 
 	for _, args := range tests {
-		cmd := testRootCommand(commandHandlers{})
+		cmd := testRootCommand(t, commandHandlers{})
 		cmd.SetArgs(args)
 		err := cmd.Execute()
 		if err == nil {
@@ -133,7 +133,8 @@ func TestRunReturnsUsageExitCode(t *testing.T) {
 	}
 }
 
-func testRootCommand(handlers commandHandlers) *cobra.Command {
+func testRootCommand(t *testing.T, handlers commandHandlers) *cobra.Command {
+	t.Helper()
 	var stdout bytes.Buffer
 	if handlers.runTUI == nil {
 		handlers.runTUI = func() error { return nil }
@@ -144,7 +145,7 @@ func testRootCommand(handlers commandHandlers) *cobra.Command {
 	if handlers.update == nil {
 		handlers.update = func(context.Context, io.Writer, updateOptions) error { return nil }
 	}
-	cmd := newRootCommand(context.Background(), &stdout, handlers)
+	cmd := newRootCommand(t.Context(), &stdout, handlers)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&bytes.Buffer{})
 	return cmd

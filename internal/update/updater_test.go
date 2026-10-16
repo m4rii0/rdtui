@@ -1,7 +1,6 @@
 package update
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -40,7 +39,7 @@ func TestCheckDetectsUpdateAndAsset(t *testing.T) {
 	server := newReleaseServer(t, []byte("asset"), false)
 	defer server.Close()
 
-	res, err := Check(context.Background(), CheckOptions{
+	res, err := Check(t.Context(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Platform:       Platform{OS: "linux", Arch: "amd64"},
 		Client:         &Client{HTTPClient: server.Client(), BaseURL: server.URL},
@@ -60,7 +59,7 @@ func TestCheckNoUpdate(t *testing.T) {
 	server := newReleaseServer(t, []byte("asset"), false)
 	defer server.Close()
 
-	res, err := Check(context.Background(), CheckOptions{
+	res, err := Check(t.Context(), CheckOptions{
 		CurrentVersion: "v1.2.0",
 		Platform:       Platform{OS: "linux", Arch: "amd64"},
 		Client:         &Client{HTTPClient: server.Client(), BaseURL: server.URL},
@@ -84,7 +83,7 @@ func TestUpdateDownloadsVerifiesAndWritesWindowsReplacement(t *testing.T) {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	res, err := Update(context.Background(), UpdateOptions{
+	res, err := Update(t.Context(), UpdateOptions{
 		CurrentVersion: "v1.0.0",
 		Platform:       Platform{OS: "windows", Arch: "amd64"},
 		Client:         &Client{HTTPClient: server.Client(), BaseURL: server.URL},
@@ -116,7 +115,7 @@ func TestUpdateFailsOnChecksumMismatch(t *testing.T) {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	_, err := Update(context.Background(), UpdateOptions{
+	_, err := Update(t.Context(), UpdateOptions{
 		CurrentVersion: "v1.0.0",
 		Platform:       Platform{OS: "windows", Arch: "amd64"},
 		Client:         &Client{HTTPClient: server.Client(), BaseURL: server.URL},

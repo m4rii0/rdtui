@@ -1,16 +1,18 @@
 package realdebrid
 
 import (
-	"context"
+	"encoding/json"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/m4rii0/rdtui/internal/version"
+	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 func TestClientUserSuccess(t *testing.T) {
@@ -31,7 +33,7 @@ func TestClientUserSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	user, err := client.User(context.Background())
+	user, err := client.User(t.Context())
 	if err != nil {
 		t.Fatalf("User() error = %v", err)
 	}
@@ -76,7 +78,7 @@ func TestClientListTorrentsParsesIntegerProgressResponse(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	torrents, err := client.ListTorrents(context.Background(), 10)
+	torrents, err := client.ListTorrents(t.Context(), 10)
 	if err != nil {
 		t.Fatalf("ListTorrents() error = %v", err)
 	}
@@ -98,7 +100,7 @@ func TestClientListTorrentsParsesFloatProgressResponse(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	torrents, err := client.ListTorrents(context.Background(), 10)
+	torrents, err := client.ListTorrents(t.Context(), 10)
 	if err != nil {
 		t.Fatalf("ListTorrents() error = %v", err)
 	}
@@ -115,17 +117,38 @@ func TestClientTorrentInfoParsesFloatProgressResponse(t *testing.T) {
 		if r.URL.Path != "/torrents/info/abc" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = io.WriteString(w, `{"id":"abc","filename":"Example","original_filename":"Example","hash":"h","bytes":123,"original_bytes":123,"host":"rd","split":50,"progress":99.97,"status":"downloading","added":"2030-01-01T00:00:00Z","files":[],"links":[]}`)
+		_, _ = io.WriteString(w, `{"id":"abc","filename":"Example","original_filename":"Original","hash":"h","bytes":123,"original_bytes":456,"host":"rd","split":50,"progress":99.97,"status":"downloading","added":"2030-01-01T00:00:00Z","ended":"2030-01-02T00:00:00Z","seeders":3,"speed":1024,"files":[{"id":1,"path":"movie.mkv","bytes":123,"selected":1}],"links":["https://example.com/link"]}`)
 	}))
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	info, err := client.TorrentInfo(context.Background(), "abc")
+	info, err := client.TorrentInfo(t.Context(), "abc")
 	if err != nil {
 		t.Fatalf("TorrentInfo() error = %v", err)
 	}
 	if math.Abs(info.Progress-99.97) > 0.0001 {
 		t.Fatalf("progress = %v, want 99.97", info.Progress)
+	}
+	want := models.TorrentInfo{
+		ID:               "abc",
+		Filename:         "Example",
+		Hash:             "h",
+		Bytes:            123,
+		Host:             "rd",
+		Split:            50,
+		Progress:         99.97,
+		Status:           "downloading",
+		Added:            time.Date(2030, 1, 1, 0, 0, 0, 0, time.Local),
+		Ended:            time.Date(2030, 1, 2, 0, 0, 0, 0, time.Local),
+		Links:            []string{"https://example.com/link"},
+		OriginalFilename: "Original",
+		OriginalBytes:    456,
+		Seeders:          3,
+		Speed:            1024,
+		Files:            []models.TorrentFile{{ID: 1, Path: "movie.mkv", Bytes: 123, Selected: true}},
+	}
+	if !reflect.DeepEqual(info, want) {
+		t.Errorf("TorrentInfo() = %+v, want %+v", info, want)
 	}
 }
 
@@ -153,7 +176,7 @@ func TestClientAddMagnetAcceptsCreatedResponse(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	result, err := client.AddMagnet(context.Background(), "magnet:?xt=urn:btih:abc&tr=udp://tracker.example/announce")
+	result, err := client.AddMagnet(t.Context(), "magnet:?xt=urn:btih:abc&tr=udp://tracker.example/announce")
 	if err != nil {
 		t.Fatalf("AddMagnet() error = %v", err)
 	}
@@ -181,7 +204,7 @@ func TestClientAddTorrentFileSetsUserAgent(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	result, err := client.AddTorrentFile(context.Background(), "example.torrent", []byte("torrent data"))
+	result, err := client.AddTorrentFile(t.Context(), "example.torrent", []byte("torrent data"))
 	if err != nil {
 		t.Fatalf("AddTorrentFile() error = %v", err)
 	}
@@ -207,7 +230,7 @@ func TestClientUnrestrictLinkUsesFormData(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	link, err := client.UnrestrictLink(context.Background(), "https://example.com/file")
+	link, err := client.UnrestrictLink(t.Context(), "https://example.com/file")
 	if err != nil {
 		t.Fatalf("UnrestrictLink() error = %v", err)
 	}
@@ -224,7 +247,7 @@ func TestClientReturnsAPIErrorOnUnauthorized(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("bad-token", server.URL, server.URL)
-	_, err := client.User(context.Background())
+	_, err := client.User(t.Context())
 	if err == nil {
 		t.Fatal("User() error = nil, want error")
 	}
@@ -241,12 +264,31 @@ func TestClientReturnsAPIErrorOnRateLimit(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("token-123", server.URL, server.URL)
-	_, err := client.UnrestrictLink(context.Background(), "https://example.com/file")
+	_, err := client.UnrestrictLink(t.Context(), "https://example.com/file")
 	if err == nil {
 		t.Fatal("UnrestrictLink() error = nil, want error")
 	}
 	if !strings.Contains(err.Error(), "Too many requests") {
 		t.Fatalf("error = %v, want API message", err)
+	}
+}
+
+func TestErrorResponseJSONOmitsZeroCode(t *testing.T) {
+	for _, tt := range []struct {
+		code int
+		want string
+	}{
+		{0, `{"error":"failure"}`},
+		{42, `{"error":"failure","error_code":42}`},
+	} {
+		response := ErrorResponse{Error: "failure", ErrorCode: tt.code}
+		data, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("Marshal() error = %v", err)
+		}
+		if string(data) != tt.want {
+			t.Errorf("Marshal(%+v) = %s, want %s", response, data, tt.want)
+		}
 	}
 }
 

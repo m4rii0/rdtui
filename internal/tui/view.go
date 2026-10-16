@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -391,7 +392,7 @@ func listFooter(m Model) string {
 }
 
 func detailFooter() string {
-	m := Model{mode: modeDetail, detail: &models.TorrentInfo{Torrent: models.Torrent{Status: "downloaded"}}}
+	m := Model{mode: modeDetail, detail: &models.TorrentInfo{Status: "downloaded"}}
 	return renderShortcutFooter(m.renderShortcutDefs(), m)
 }
 
@@ -587,7 +588,7 @@ func fitLines(lines []string, height int) []string {
 		return lines
 	}
 	if len(lines) > height {
-		trimmed := append([]string(nil), lines[:height]...)
+		trimmed := slices.Clone(lines[:height])
 		if height > 0 {
 			trimmed[height-1] = mutedStyle.Render("...")
 		}

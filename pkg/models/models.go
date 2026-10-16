@@ -32,7 +32,7 @@ type Torrent struct {
 	Progress float64   `json:"progress"`
 	Status   string    `json:"status"`
 	Added    time.Time `json:"added"`
-	Ended    time.Time `json:"ended,omitempty"`
+	Ended    time.Time `json:"ended,omitzero"`
 	Links    []string  `json:"links"`
 }
 
@@ -48,8 +48,8 @@ type TorrentInfo struct {
 	OriginalFilename string        `json:"original_filename"`
 	OriginalBytes    int64         `json:"original_bytes"`
 	Files            []TorrentFile `json:"files"`
-	Seeders          int           `json:"seeders,omitempty"`
-	Speed            int64         `json:"speed,omitempty"`
+	Seeders          int           `json:"seeders,omitzero"`
+	Speed            int64         `json:"speed,omitzero"`
 }
 
 type AddTorrentResult struct {

@@ -41,7 +41,7 @@ func Init() {
 
 func Enabled() bool { return enabled }
 
-func Log(format string, args ...interface{}) {
+func Log(format string, args ...any) {
 	if !enabled || writer == nil {
 		return
 	}

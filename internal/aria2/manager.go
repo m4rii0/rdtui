@@ -195,7 +195,7 @@ func (m *Manager) ensureStarted(ctx context.Context) error {
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < startAttempts; attempt++ {
+	for range startAttempts {
 		if err := m.startOnce(ctx, resolved); err == nil {
 			return nil
 		} else {

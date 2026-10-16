@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -94,7 +95,7 @@ func (b *bulkFileSelectionState) applyDetails(details []models.TorrentInfo, outc
 		if detail.Filename != "" {
 			plan.Name = detail.Filename
 		}
-		plan.Files = append([]models.TorrentFile(nil), detail.Files...)
+		plan.Files = slices.Clone(detail.Files)
 		plan.Selected = defaultSelectedFiles(detail)
 		plans = append(plans, plan)
 	}
@@ -246,7 +247,7 @@ func bulkFileSelectionSummaryLine(success, failed, skipped int) string {
 }
 
 func bulkFileSelectionDetailsCmd(service app.AppService, plans []bulkFileSelectionPlan) tea.Cmd {
-	ordered := append([]bulkFileSelectionPlan(nil), plans...)
+	ordered := slices.Clone(plans)
 	return func() tea.Msg {
 		details := make([]models.TorrentInfo, 0, len(ordered))
 		outcomes := make([]bulkFileSelectionOutcome, 0)
@@ -263,8 +264,8 @@ func bulkFileSelectionDetailsCmd(service app.AppService, plans []bulkFileSelecti
 }
 
 func bulkFileSelectionSubmitCmd(service app.AppService, submissions []bulkFileSelectionSubmission, outcomes []bulkFileSelectionOutcome) tea.Cmd {
-	ordered := append([]bulkFileSelectionSubmission(nil), submissions...)
-	baseOutcomes := append([]bulkFileSelectionOutcome(nil), outcomes...)
+	ordered := slices.Clone(submissions)
+	baseOutcomes := slices.Clone(outcomes)
 	return func() tea.Msg {
 		result := bulkFileSelectionResultMsg{}
 		var details []string

@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,7 +36,7 @@ func TestBootstrapPrefersConfiguredPrivateToken(t *testing.T) {
 	}
 
 	manager := NewManager(store, cfg)
-	session, err := manager.Bootstrap(context.Background())
+	session, err := manager.Bootstrap(t.Context())
 	if err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}

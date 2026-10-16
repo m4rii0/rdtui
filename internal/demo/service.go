@@ -119,11 +119,8 @@ func (s *Service) AddMagnet(_ context.Context, magnet string) (models.AddTorrent
 	s.nextID++
 
 	name := "New Magnet Torrent"
-	if idx := strings.Index(magnet, "dn="); idx >= 0 {
-		rest := magnet[idx+3:]
-		if end := strings.IndexByte(rest, '&'); end >= 0 {
-			rest = rest[:end]
-		}
+	if _, rest, found := strings.Cut(magnet, "dn="); found {
+		rest, _, _ = strings.Cut(rest, "&")
 		name = strings.ReplaceAll(rest, "+", " ")
 	}
 
@@ -140,8 +137,8 @@ func (s *Service) AddTorrentURL(_ context.Context, remoteURL string) (models.Add
 	s.nextID++
 
 	name := remoteURL
-	if idx := strings.LastIndex(remoteURL, "/"); idx >= 0 && idx < len(remoteURL)-1 {
-		name = remoteURL[idx+1:]
+	if _, base, found := strings.CutLast(remoteURL, "/"); found && base != "" {
+		name = base
 	}
 
 	entry := s.makeTorrent(id, name, "waiting_files_selection", 0, randSize())
@@ -159,8 +156,8 @@ func (s *Service) ImportTorrentFiles(_ context.Context, paths []string) []models
 		s.nextID++
 
 		name := path
-		if idx := strings.LastIndex(path, "/"); idx >= 0 {
-			name = path[idx+1:]
+		if _, base, found := strings.CutLast(path, "/"); found {
+			name = base
 		}
 		name = strings.TrimSuffix(name, ".torrent")
 
