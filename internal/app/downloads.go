@@ -6,12 +6,23 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/m4rii0/rdtui/internal/download"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 var ErrStaleDownload = errors.New("download reference is no longer current")
+
+var (
+	ErrActiveDownload          = errors.New("an unrelated download is active")
+	ErrQueueActive             = errors.New("a bulk queue owns download admission")
+	ErrStaleQueue              = errors.New("queue identity or decision is no longer current")
+	ErrTransferStopUnconfirmed = errors.New("download termination is unconfirmed; restart the application")
+)
+
+type QueueID uint64
+type QueueLease struct{ ID QueueID }
 
 // DownloadRef identifies an admission even when a backend reuses its GID.
 type DownloadRef struct {
@@ -48,6 +59,9 @@ type DownloadCoordinator struct {
 	transfer   context.CancelFunc
 	start      *startReservation
 	query      *statusQuery
+	nextQueue  QueueID
+	lease      QueueLease
+	owner      QueueID
 }
 
 type startReservation struct {
@@ -55,6 +69,8 @@ type startReservation struct {
 	done       chan struct{}
 	snapshot   DownloadSnapshot
 	err        error
+	owner      QueueID
+	cancel     context.CancelFunc
 }
 
 type statusQuery struct {
@@ -79,6 +95,17 @@ func NewDownloadCoordinator(parent context.Context, backend download.Backend, di
 }
 
 func (c *DownloadCoordinator) Start(ctx context.Context, url, filename string) (DownloadStart, error) {
+	return c.startDownload(ctx, QueueLease{}, url, filename)
+}
+
+func (c *DownloadCoordinator) StartQueued(ctx context.Context, lease QueueLease, url, filename string) (DownloadStart, error) {
+	if lease.ID == 0 {
+		return DownloadStart{}, ErrStaleQueue
+	}
+	return c.startDownload(ctx, lease, url, filename)
+}
+
+func (c *DownloadCoordinator) startDownload(ctx context.Context, lease QueueLease, url, filename string) (DownloadStart, error) {
 	if err := ctx.Err(); err != nil {
 		return DownloadStart{}, err
 	}
@@ -93,6 +120,10 @@ func (c *DownloadCoordinator) Start(ctx context.Context, url, filename string) (
 		c.mu.Unlock()
 		return DownloadStart{}, err
 	}
+	if lease.ID != 0 && c.lease != lease {
+		c.mu.Unlock()
+		return DownloadStart{}, ErrStaleQueue
+	}
 	reservation, reused := c.start, true
 	if reservation == nil {
 		if c.current != nil && !c.current.Download.IsTerminal() {
@@ -100,12 +131,16 @@ func (c *DownloadCoordinator) Start(ctx context.Context, url, filename string) (
 			c.mu.Unlock()
 			return result, nil
 		}
+		if lease.ID == 0 && c.lease.ID != 0 {
+			c.mu.Unlock()
+			return DownloadStart{}, ErrQueueActive
+		}
 		c.generation++
-		reservation = &startReservation{generation: c.generation, done: make(chan struct{})}
+		transferCtx, cancel := context.WithCancel(c.ctx)
+		reservation = &startReservation{generation: c.generation, done: make(chan struct{}), owner: lease.ID, cancel: cancel}
 		c.start = reservation
 		reused = false
-		transferCtx, cancel := context.WithCancel(c.ctx)
-		request := models.ManagedDownloadRequest{URL: url, Dir: c.dir, Filename: download.FilenameForURL(url, filename)}
+		request := models.ManagedDownloadRequest{URL: url, Dir: c.dir, Filename: downloadFilename(url, filename)}
 		c.wg.Go(func() { c.runStart(transferCtx, cancel, reservation, request) })
 	}
 	c.mu.Unlock()
@@ -141,6 +176,7 @@ func (c *DownloadCoordinator) runStart(ctx context.Context, cancel context.Cance
 		reservation.snapshot = DownloadSnapshot{Ref: DownloadRef{Generation: reservation.generation, GID: started.GID}, Download: started}
 		c.current = new(reservation.snapshot)
 		c.transfer = cancel
+		c.owner = reservation.owner
 		if started.IsTerminal() {
 			cancel()
 		}
@@ -148,6 +184,101 @@ func (c *DownloadCoordinator) runStart(ctx context.Context, cancel context.Cance
 	if c.start == reservation {
 		c.start = nil
 	}
+}
+
+// AcquireQueue reserves admission across resolution, confirmation and item gaps.
+func (c *DownloadCoordinator) AcquireQueue(ctx context.Context) (QueueLease, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return QueueLease{}, err
+	}
+	if c.closing || c.ctx.Err() != nil {
+		c.beginCloseLocked()
+		return QueueLease{}, c.closedErrorLocked()
+	}
+	if c.lease.ID != 0 {
+		return QueueLease{}, ErrQueueActive
+	}
+	if c.start != nil || (c.current != nil && !c.current.Download.IsTerminal()) {
+		return QueueLease{}, ErrActiveDownload
+	}
+	c.nextQueue++
+	c.lease = QueueLease{ID: c.nextQueue}
+	return c.lease, nil
+}
+
+func (c *DownloadCoordinator) ReleaseQueue(lease QueueLease) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if lease.ID == 0 || c.lease != lease {
+		return ErrStaleQueue
+	}
+	if errors.Is(c.fault, ErrTransferStopUnconfirmed) || c.start != nil || (c.current != nil && !c.current.Download.IsTerminal()) {
+		return ErrTransferStopUnconfirmed
+	}
+	c.lease = QueueLease{}
+	return nil
+}
+
+// CancelQueued retains the lease until a terminal observation proves that the
+// owned transfer stopped. A zero ref also covers cancellation during admission.
+func (c *DownloadCoordinator) CancelQueued(ctx context.Context, lease QueueLease, ref DownloadRef) error {
+	c.mu.Lock()
+	if lease.ID == 0 || c.lease != lease {
+		c.mu.Unlock()
+		return ErrStaleQueue
+	}
+	reservation := c.start
+	if ref != (DownloadRef{}) && (c.current == nil || c.current.Ref != ref || c.owner != lease.ID || (reservation != nil && reservation.generation != ref.Generation)) {
+		c.mu.Unlock()
+		return ErrStaleDownload
+	}
+	if reservation != nil && reservation.owner == lease.ID {
+		reservation.cancel()
+	} else if c.current != nil && c.owner == lease.ID && c.transfer != nil {
+		c.transfer()
+	}
+	c.mu.Unlock()
+	if reservation != nil {
+		select {
+		case <-reservation.done:
+		case <-ctx.Done():
+			return c.stopUnconfirmed(ctx.Err())
+		}
+	}
+	c.mu.Lock()
+	if errors.Is(c.fault, download.ErrUncertainStart) {
+		err := c.fault
+		c.mu.Unlock()
+		return err
+	}
+	if c.current == nil || c.owner != lease.ID || c.current.Download.IsTerminal() {
+		c.mu.Unlock()
+		return nil
+	}
+	ref = c.current.Ref
+	c.mu.Unlock()
+	for {
+		snapshot, err := c.Status(ctx, ref)
+		if snapshot.Ref == ref && snapshot.Download.IsTerminal() {
+			return nil
+		}
+		if err != nil && (ctx.Err() != nil || errors.Is(err, download.ErrClosed) || errors.Is(err, ErrStaleDownload) || errors.Is(err, download.ErrUncertainStart) || errors.Is(err, ErrTransferStopUnconfirmed)) {
+			return c.stopUnconfirmed(err)
+		}
+		if err := waitBatch(ctx, time.Second); err != nil {
+			return c.stopUnconfirmed(err)
+		}
+	}
+}
+
+func (c *DownloadCoordinator) stopUnconfirmed(cause error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fault = errors.Join(ErrTransferStopUnconfirmed, c.fault, cause)
+	c.beginCloseLocked()
+	return c.fault
 }
 
 func (c *DownloadCoordinator) Current() (DownloadSnapshot, bool) {
@@ -213,11 +344,11 @@ func (c *DownloadCoordinator) runStatus(query *statusQuery) {
 	}
 	query.snapshot = *c.current
 	query.err = err
-	if err == nil {
+	if err == nil && !c.current.Download.IsTerminal() {
 		observed = mergeDownload(observed, c.current.Download)
 		observed.GID = query.ref.GID
 		query.snapshot.Download = observed
-	} else if errors.Is(err, download.ErrBackendLost) {
+	} else if errors.Is(err, download.ErrBackendLost) && !c.current.Download.IsTerminal() {
 		query.snapshot.Download.Status = models.ManagedDownloadStatusError
 		query.snapshot.Download.ErrorMessage = err.Error()
 	}

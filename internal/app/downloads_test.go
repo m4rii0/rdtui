@@ -23,6 +23,116 @@ type coordinatorBackend struct {
 	shutdownOnce                           sync.Once
 }
 
+func TestQueueTerminalObservationCannotResurrectTransfer(t *testing.T) {
+	b := newCoordinatorBackend()
+	c := testCoordinator(t, b)
+	old := admit(t, c, b, "old")
+	result := asyncStatus(c, t.Context(), old.Ref)
+	call := receive(t, b.statuses)
+	call.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
+	receive(t, result)
+	result = asyncStatus(c, t.Context(), old.Ref)
+	call = receive(t, b.statuses)
+	call.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusActive}}
+	observed := receive(t, result)
+	if !observed.snapshot.Download.IsComplete() {
+		t.Fatal("terminal transfer resurrected", observed)
+	}
+	lease, err := c.AcquireQueue(t.Context())
+	if err != nil {
+		t.Fatal("old observation blocked queue", err)
+	}
+	c.ReleaseQueue(lease)
+}
+
+func TestQueueLeaseIdentityRejectsForeignControl(t *testing.T) {
+	b := newCoordinatorBackend()
+	c := testCoordinator(t, b)
+	lease, err := c.AcquireQueue(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := QueueLease{ID: lease.ID + 1}
+	for _, bad := range []QueueLease{{}, foreign} {
+		if _, err := c.StartQueued(t.Context(), bad, "foreign", ""); !errors.Is(err, ErrStaleQueue) {
+			t.Fatal(err)
+		}
+		if err := c.CancelQueued(t.Context(), bad, DownloadRef{}); !errors.Is(err, ErrStaleQueue) {
+			t.Fatal(err)
+		}
+		if err := c.ReleaseQueue(bad); !errors.Is(err, ErrStaleQueue) {
+			t.Fatal(err)
+		}
+	}
+	results := make(chan startResult, 1)
+	go func() { s, e := c.StartQueued(t.Context(), lease, "url", "file"); results <- startResult{s, e} }()
+	call := receive(t, b.starts)
+	if _, err := c.AcquireQueue(t.Context()); !errors.Is(err, ErrQueueActive) {
+		t.Fatal(err)
+	}
+	call.reply <- backendResult{download: models.ManagedDownload{GID: "owned", Status: models.ManagedDownloadStatusActive}}
+	started := receive(t, results)
+	wrongRef := started.start.Snapshot.Ref
+	wrongRef.Generation++
+	if err := c.CancelQueued(t.Context(), lease, wrongRef); !errors.Is(err, ErrStaleDownload) {
+		t.Fatal(err)
+	}
+	if call.ctx.Err() != nil {
+		t.Fatal("foreign reference canceled owned transfer")
+	}
+	result := asyncStatus(c, t.Context(), started.start.Snapshot.Ref)
+	query := receive(t, b.statuses)
+	query.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusComplete}}
+	receive(t, result)
+	if err := c.ReleaseQueue(lease); err != nil {
+		t.Fatal(err)
+	}
+	next, err := c.AcquireQueue(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ID <= lease.ID {
+		t.Fatal("lease identity reused")
+	}
+	if err := c.ReleaseQueue(lease); !errors.Is(err, ErrStaleQueue) {
+		t.Fatal(err)
+	}
+	if err := c.ReleaseQueue(next); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueueOldReferenceCannotCancelNextAdmission(t *testing.T) {
+	b := newCoordinatorBackend()
+	c := testCoordinator(t, b)
+	lease, err := c.AcquireQueue(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func() <-chan startResult {
+		results := make(chan startResult, 1)
+		go func() { s, e := c.StartQueued(t.Context(), lease, "url", "file"); results <- startResult{s, e} }()
+		return results
+	}
+	results := start()
+	call := receive(t, b.starts)
+	call.reply <- backendResult{download: models.ManagedDownload{GID: "old", Status: models.ManagedDownloadStatusComplete}}
+	old := receive(t, results).start.Snapshot.Ref
+	results = start()
+	call = receive(t, b.starts)
+	if err := c.CancelQueued(t.Context(), lease, old); !errors.Is(err, ErrStaleDownload) {
+		t.Fatal("old ref controlled next admission", err)
+	}
+	if call.ctx.Err() != nil {
+		t.Fatal("old reference canceled next transfer")
+	}
+	call.reply <- backendResult{download: models.ManagedDownload{GID: "new", Status: models.ManagedDownloadStatusComplete}}
+	if result := receive(t, results); result.err != nil {
+		t.Fatal(result)
+	}
+	c.ReleaseQueue(lease)
+}
+
 type backendResult struct {
 	download models.ManagedDownload
 	err      error
