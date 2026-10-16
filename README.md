@@ -49,6 +49,34 @@ Then run:
 rdtui
 ```
 
+### Publish a Release or Release Candidate
+
+In GitHub, open **Actions → Release → Run workflow**, select the branch/ref to
+build, and choose:
+
+- **bump:** `patch`, `minor`, or `major` (default: `patch`).
+- **channel:** `rc` or `stable` (default: `stable`).
+
+The target version is calculated from the highest stable Git tag. For example,
+with `v1.2.3` as the latest stable tag, `minor` + `rc` publishes
+`v1.3.0-rc.1`; repeating it publishes `v1.3.0-rc.2`. Selecting `minor` + `stable`
+publishes `v1.3.0`, ignoring the RC suffixes.
+
+RCs are GitHub **prereleases**, never `latest`. Download their binaries manually
+from the corresponding GitHub release to test them. `rdtui check-update` and
+`rdtui update` continue to use stable releases only.
+
+Both channels run verification and race tests before building the six platform
+binaries, checking their embedded version, and generating and signing checksums.
+Only then does the workflow create and push the tag and publish the release.
+The final stable release is rebuilt, not promoted from an RC's existing assets:
+select the same tested commit/ref when publishing it, and ensure the target
+stable version has not advanced since testing.
+
+Release runs are serialized across branches and channels to avoid version
+collisions. GitHub may replace an older pending run with a newer dispatch; this
+is not a FIFO queue. The existing `release` environment protections still apply.
+
 ### Verify Release Assets
 
 GitHub release checksums are signed in CI with keyless Sigstore signing. To verify a downloaded release, run these commands from the directory containing the release assets:
@@ -56,12 +84,17 @@ GitHub release checksums are signed in CI with keyless Sigstore signing. To veri
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/m4rii0/rdtui/\.github/workflows/release\.yml@refs/tags/v.*$' \
+  --certificate-identity 'https://github.com/m4rii0/rdtui/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
 
 sha256sum --check checksums.txt
 ```
+
+This identity is for a manual workflow dispatch from `main`. For another trusted
+branch or tag, replace `refs/heads/main` with that exact dispatch ref. The signing
+identity follows the ref used to run the workflow, not the release tag created
+later inside the job; do not broaden the identity check to arbitrary refs.
 
 ## Build
 

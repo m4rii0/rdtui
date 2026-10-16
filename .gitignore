@@ -4,6 +4,9 @@ bin/
 *.test
 coverage.out
 
+# Python cache artifacts
+__pycache__/
+
 # OS/editor noise
 .DS_Store
 .idea/
