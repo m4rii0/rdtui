@@ -274,9 +274,8 @@ or unconfirmed transfer stop closes download admission conservatively: **restart
 the application before starting more downloads**. Ambiguous mutations are not
 automatically replayed.
 
-Known aria2 limitation: local smoke testing observed a cleanup timeout on quit
-after a completed download because its process-exit grace period exceeds the
-CLI cleanup budget. See the [lifecycle notes](docs/architecture.md#contexts-admission-and-shutdown).
+Shutdown stops and reaps the app-owned aria2 process directly, interrupting RPC
+waits without relying on a graceful shutdown request reaching a closing socket.
 
 If you only want the direct URL, press `y` instead. That flow still shows the URL and copies it to the clipboard when possible without starting `aria2c`.
 

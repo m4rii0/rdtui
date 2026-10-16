@@ -43,26 +43,27 @@ type DownloadStart struct {
 // DownloadCoordinator owns admission, transfer lifetimes and cached snapshots.
 // Request contexts only bound waiting; parent owns the application lifetime.
 type DownloadCoordinator struct {
-	mu         sync.Mutex
-	backend    download.Backend
-	dir        string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	stopParent func() bool
-	wg         sync.WaitGroup
-	done       chan struct{}
-	closing    bool
-	fault      error
-	closeErr   error
-	generation uint64
-	current    *DownloadSnapshot
-	transfer   context.CancelFunc
-	start      *startReservation
-	query      *statusQuery
-	queryErr   error
-	nextQueue  QueueID
-	lease      QueueLease
-	owner      QueueID
+	mu            sync.Mutex
+	backend       download.Backend
+	dir           string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	stopParent    func() bool
+	wg            sync.WaitGroup
+	done          chan struct{}
+	closing       bool
+	closeDeadline time.Time
+	fault         error
+	closeErr      error
+	generation    uint64
+	current       *DownloadSnapshot
+	transfer      context.CancelFunc
+	start         *startReservation
+	query         *statusQuery
+	queryErr      error
+	nextQueue     QueueID
+	lease         QueueLease
+	owner         QueueID
 }
 
 type startReservation struct {
@@ -389,16 +390,39 @@ func mergeDownload(observed, known models.ManagedDownload) models.ManagedDownloa
 
 func (c *DownloadCoordinator) Close(ctx context.Context) error {
 	c.mu.Lock()
+	first := !c.closing
+	if first {
+		c.closeDeadline, _ = ctx.Deadline()
+	}
 	c.beginCloseLocked()
+	deadline, hasDeadline := ctx.Deadline()
+	shorter := !first && hasDeadline && deadline.Before(c.closeDeadline)
 	c.mu.Unlock()
+	if shorter {
+		// Root cancellation may have initiated shutdown before Close supplied
+		// the shared drain deadline. Forward an earlier deadline to the same
+		// backend shutdown synchronously; do not create another background waiter.
+		if err := c.backend.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	result := func() error {
+		if !first && (errors.Is(c.closeErr, context.DeadlineExceeded) || errors.Is(c.closeErr, context.Canceled)) {
+			// A bounded shutdown request can expire before the backend joins its
+			// workers. Repeated closes wait on that same backend completion, not
+			// just the already-finished coordinator shutdown request.
+			return c.backend.Shutdown(ctx)
+		}
+		return c.closeErr
+	}
 	select {
 	case <-c.done:
-		return c.closeErr
+		return result()
 	default:
 	}
 	select {
 	case <-c.done:
-		return c.closeErr
+		return result()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -413,8 +437,18 @@ func (c *DownloadCoordinator) beginCloseLocked() {
 	c.closing = true
 	c.stopParent()
 	c.cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	if !c.closeDeadline.IsZero() && c.closeDeadline.Before(deadline) {
+		deadline = c.closeDeadline
+	}
+	if rootDeadline, ok := c.ctx.Deadline(); ok && rootDeadline.Before(deadline) {
+		deadline = rootDeadline
+	}
+	c.closeDeadline = deadline
 	c.wg.Go(func() {
-		err := c.backend.Shutdown(context.Background())
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		err := c.backend.Shutdown(ctx)
 		c.mu.Lock()
 		c.closeErr = err
 		c.mu.Unlock()

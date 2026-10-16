@@ -614,6 +614,114 @@ func TestCoordinatorCloseDeadlineDoesNotAbandonCleanup(t *testing.T) {
 	}
 }
 
+func TestCoordinatorBackendShutdownHasIndependentBound(t *testing.T) {
+	for _, parentCloses := range []bool{false, true} {
+		t.Run(map[bool]string{false: "caller", true: "parent"}[parentCloses], func(t *testing.T) {
+			parent, stop := context.WithCancel(t.Context())
+			defer stop()
+			observed := make(chan context.Context, 1)
+			b := &closingBackend{shutdown: func(ctx context.Context) error {
+				if err := ctx.Err(); err != nil {
+					t.Errorf("shutdown inherited root cancellation: %v", err)
+				}
+				observed <- ctx
+				return nil
+			}}
+			c := NewDownloadCoordinator(parent, b, t.TempDir())
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if parentCloses {
+				stop()
+			} else if err := c.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			backendCtx := receive(t, observed)
+			deadline, ok := backendCtx.Deadline()
+			if !ok || deadline.After(time.Now().Add(2*time.Second)) {
+				t.Fatalf("backend shutdown is unbounded: %v %v", deadline, ok)
+			}
+			if !parentCloses {
+				callerDeadline, _ := ctx.Deadline()
+				if deadline.After(callerDeadline) {
+					t.Fatalf("backend exceeded close deadline: %v > %v", deadline, callerDeadline)
+				}
+			}
+			if err := c.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCoordinatorCloseRetriesWaitingForBackendDrain(t *testing.T) {
+	var calls atomic.Int64
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	b := &closingBackend{shutdown: func(ctx context.Context) error {
+		if calls.Add(1) == 1 {
+			return context.DeadlineExceeded // Stop requested, but drain not complete.
+		}
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	c := NewDownloadCoordinator(t.Context(), b, t.TempDir())
+	if err := c.Close(t.Context()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lost backend cleanup timeout: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- c.Close(t.Context()) }()
+	select {
+	case <-entered:
+	case err := <-result:
+		t.Fatalf("repeated close did not await backend completion: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("repeated close did not reach backend drain")
+	}
+	unblock()
+	if err := receive(t, result); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoordinatorCloseForwardsEarlierDeadlineAfterParentStop(t *testing.T) {
+	parent, stop := context.WithCancel(t.Context())
+	defer stop()
+	entered := make(chan context.Context, 2)
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var calls atomic.Int64
+	b := &closingBackend{shutdown: func(ctx context.Context) error {
+		entered <- ctx
+		if calls.Add(1) == 1 {
+			<-release
+		} else {
+			unblock() // Both waiters observe the same backend completion.
+		}
+		return nil
+	}}
+	c := NewDownloadCoordinator(parent, b, t.TempDir())
+	stop()
+	receive(t, entered) // Root shutdown has already admitted its owned stop worker.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := c.Close(ctx); err != nil {
+		t.Fatalf("earlier close deadline never reached backend: %v", err)
+	}
+	forwarded := receive(t, entered)
+	want, _ := ctx.Deadline()
+	got, ok := forwarded.Deadline()
+	if !ok || !got.Equal(want) {
+		t.Fatalf("shared deadline was not forwarded: %v != %v", got, want)
+	}
+}
+
 type checkedContext struct {
 	context.Context
 	checked chan struct{}

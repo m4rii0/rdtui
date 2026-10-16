@@ -440,13 +440,14 @@ func TestWaitForReadyFailsWhenProcessExits(t *testing.T) {
 	}
 }
 
-func TestShutdownKillsProcessAfterDeadline(t *testing.T) {
+// A shutdown RPC cannot be delivered once Close interrupts the transport. The
+// manager must stop its owned process anyway, not wait out a startup grace period.
+func TestShutdownReapsProcessWhenRPCShutdownIsUndeliverable(t *testing.T) {
 	t.Parallel()
 
 	m := NewManager("")
 	proc := newFakeProcess()
-	shutdownStarted := make(chan struct{})
-	rpc := &fakeRPCClient{onShutdown: func() { close(shutdownStarted) }}
+	rpc := &undeliverableShutdownRPC{closed: make(chan struct{})}
 	waitDone := make(chan error, 1)
 	m.process = proc
 	m.rpc = rpc
@@ -455,36 +456,45 @@ func TestShutdownKillsProcessAfterDeadline(t *testing.T) {
 	m.wg.Go(func() { m.watchProcess(proc, waitDone) })
 	m.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(func() {
+		_ = proc.Kill()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := m.Shutdown(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	result := make(chan error, 1)
-	go func() { result <- m.Shutdown(deadlineOnCancel{ctx}) }()
-	<-shutdownStarted
-	cancel() // Expire only after the shutdown worker acknowledges its RPC.
-	err := <-result
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Shutdown() error = %v, want %v", err, context.DeadlineExceeded)
+	if err := m.Shutdown(ctx); err != nil {
+		t.Fatalf("undeliverable RPC delayed process stop: %v", err)
 	}
 	if !proc.killed.Load() {
-		t.Fatal("expected process kill fallback")
+		t.Fatal("shutdown did not stop the owned process")
 	}
-	if !rpc.shutdownCalled.Load() {
-		t.Fatal("expected rpc shutdown before kill fallback")
+	select {
+	case <-waitDone:
+	default:
+		t.Fatal("shutdown returned before process reaping")
 	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cleanupCancel()
-	if err := m.Shutdown(cleanupCtx); err != nil {
+	if err := m.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// A manually expired deadline keeps test ordering independent of wall time.
-type deadlineOnCancel struct{ context.Context }
+type undeliverableShutdownRPC struct {
+	fakeRPCClient
+	closed chan struct{}
+	once   sync.Once
+}
 
-func (c deadlineOnCancel) Err() error {
-	if c.Context.Err() != nil {
-		return context.DeadlineExceeded
-	}
+func (r *undeliverableShutdownRPC) Shutdown() error {
+	<-r.closed
+	return io.ErrClosedPipe
+}
+
+func (r *undeliverableShutdownRPC) Close() error {
+	r.once.Do(func() { close(r.closed) })
 	return nil
 }
 

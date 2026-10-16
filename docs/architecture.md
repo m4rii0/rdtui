@@ -63,12 +63,14 @@ Repeated closes wait on the same eventual completion; a timed-out caller does no
 reopen admission or abandon cleanup. Do not use the canceled root context as the
 cleanup context.
 
-**Observed aria2 limitation:** the coordinator currently starts backend shutdown
-with a background context. Aria2's internal process-exit grace period is five
-seconds, whereas the CLI waits only two seconds. A local real-aria2 smoke run
-therefore reported `context deadline exceeded` on quit even after a successful
-download. The caller's wait is bounded, but clean aria2 exit within that budget
-is not established by the passing fake-backend tests.
+The coordinator's autonomous backend shutdown uses an independent deadline of
+at most two seconds, shortened by an earlier root deadline or the initiating
+`Close` caller's deadline. It does not inherit an already-canceled request/root.
+If root cancellation starts shutdown first, `Close` forwards an earlier shared
+deadline to the backend's same shutdown synchronously, without a new worker.
+If that bounded backend wait expires, the error is reported; a later `Close`
+waits on the backend's same eventual completion as well as coordinator workers,
+rather than mistaking the expired shutdown request for a completed drain.
 
 Both backends implement only `StartDownload(ctx, request)`,
 `DownloadStatus(ctx, id)`, and `Shutdown(ctx)` through `download.Backend`.
@@ -76,8 +78,12 @@ Admission and worker registration share a lock with shutdown. Late starts match
 `download.ErrClosed`; canceled starts are rejected before admission. No metadata
 lock is held over network, file, RPC, or process waits. Direct HTTP follows the
 transfer context. Aria2 has a registered cancellation worker that removes the
-owned GID and confirms termination; backend shutdown interrupts RPC waits and
-stops the owned process. Binary configuration is supplied to `aria2.NewManager`.
+owned GID and confirms termination. Backend shutdown directly stops the owned
+process, closes RPC transports to interrupt pending calls, and joins registered
+workers including the process reaper. It does not race a graceful shutdown RPC
+against socket closure or wait out the unrelated startup timeout. A timed-out
+caller still receives an error, and repeated calls await the same completion.
+Binary configuration is supplied to `aria2.NewManager`.
 
 ## Download identity and queue leases
 
@@ -214,8 +220,8 @@ slice ownership, and JSON regression suite. Test names are searchable with
 
 | Requirement | Evidence (package: test names) |
 |---|---|
-| R1 runtime/cancellation | app: `TestRuntimeRejectsWorkAfterStop`, `TestRuntimeCancelsAndDrains`, `TestRuntimeWaitDeadline`, `TestApplicationCloseDuringRefresh`, `TestApplicationCloseDuringOverwrite`; tui: `TestQuitCancelsOutstandingCommand`, `TestBulkApplicationRunsWithoutPresentation` |
-| R2 backend lifecycle | directdl and aria2: `TestStartRacingWithShutdown`, `TestConcurrentShutdown`, `TestShutdownDeadlineCanBeRetried`; download: `TestStartAfterShutdown`, `TestCanceledStartNotAdmitted`; directdl: `TestTransferContextCancelsHTTP`; aria2: `TestTransferContextCancelsOwnedGID`, `TestRPCAdapterCloseInterruptsBlockedWrite` |
+| R1 runtime/cancellation | app: `TestRuntimeRejectsWorkAfterStop`, `TestRuntimeCancelsAndDrains`, `TestRuntimeWaitDeadline`, `TestApplicationCloseDuringRefresh`, `TestApplicationCloseDuringOverwrite`, `TestCoordinatorBackendShutdownHasIndependentBound`, `TestCoordinatorCloseForwardsEarlierDeadlineAfterParentStop`, `TestCoordinatorCloseRetriesWaitingForBackendDrain`; tui: `TestQuitCancelsOutstandingCommand`, `TestBulkApplicationRunsWithoutPresentation` |
+| R2 backend lifecycle | directdl and aria2: `TestStartRacingWithShutdown`, `TestConcurrentShutdown`, `TestShutdownDeadlineCanBeRetried`; download: `TestStartAfterShutdown`, `TestCanceledStartNotAdmitted`; directdl: `TestTransferContextCancelsHTTP`; aria2: `TestTransferContextCancelsOwnedGID`, `TestRPCAdapterCloseInterruptsBlockedWrite`, `TestShutdownReapsProcessWhenRPCShutdownIsUndeliverable` |
 | R3 identity/single transfer | app: `TestConcurrentStartsShareReservation`, `TestConcurrentStatusQueriesCoalesce`, `TestStatusFailureDoesNotReleaseActiveSlot`, `TestLateStatusCannotOverwriteCurrent`, `TestUncertainStartRequiresRestart`, `TestQueueDuplicateCompletionAdvancesOnce`; tui: `TestLateDownloadResultIgnored`, `TestDuplicateTerminalResultIgnored`; aria2: `TestAdmittedGIDSurvivesStatusError` |
 | R4 batch results | app: `TestBatchPreservesOrderAndContinues`, `TestBatchCancelStopsRequests`, `TestCanceledMutationOutcomeUnknown`, `TestCopyCountsTargetsNotTorrents`, `TestClipboardFailureRetainsResolvedURLs`, `TestSelectionCopiesNestedIDs`; tui: `TestBatchCopyRendersExactUnits` |
 | R5 queue/TUI | app: `TestQueueAdvancesWithoutUI`, `TestQueueLeasePreventsInterleavedStarts`, `TestQueueStaleDecisionRejected`, `TestQueueCancelWaitsForTransferStop`, `TestQueueStopUnconfirmedRequiresRestart`; tui: `TestBulkApplicationRunsWithoutPresentation`, `TestBulkOverwriteDecisionUsesItemIdentity`, `TestBulkCleanupUsesTerminalOutcomes`, `TestBulkCleanupCanceledAndSkippedNotPreselected` |

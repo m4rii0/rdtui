@@ -354,10 +354,13 @@ func (m *Manager) beginShutdownLocked() {
 	m.closing = true
 	m.cancel()
 	rpc, ready, proc, waitDone := m.rpc, m.readyRPC, m.process, m.waitDone
-	if rpc != nil {
-		m.wg.Go(func() { _ = rpc.Shutdown() })
-	}
 	m.wg.Go(func() {
+		// This process is exclusively owned by the application. A graceful RPC
+		// races transport interruption and can itself block, so stop the process
+		// directly rather than waiting out the unrelated startup timeout.
+		if proc != nil {
+			_ = proc.Kill()
+		}
 		// Closing the transport interrupts add/status/readiness/removal RPCs.
 		if rpc != nil {
 			_ = rpc.Close()
@@ -366,16 +369,7 @@ func (m *Manager) beginShutdownLocked() {
 			_ = ready.Close()
 		}
 		if waitDone != nil {
-			timer := time.NewTimer(defaultStartupTimeout)
-			defer timer.Stop()
-			select {
-			case <-waitDone:
-			case <-timer.C:
-				if proc != nil {
-					_ = proc.Kill()
-				}
-				<-waitDone
-			}
+			<-waitDone
 		}
 	})
 	go func() { m.wg.Wait(); close(m.done) }()
