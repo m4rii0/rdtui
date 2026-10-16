@@ -267,7 +267,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if result, ok := msg.(featureResultMsg); ok {
 		state := m.feature(result.feature)
-		if !state.current(result.request) || (result.feature == setupFeature && result.queue != m.queueIdentity()) {
+		if !state.current(result.request) {
 			return m, nil
 		}
 		state.InFlight = false
@@ -438,6 +438,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1", "t":
 			m.auth.invalidate()
+			m.retryBootstrap = false
 			m.mode = modeTokenInput
 			m.inputAction = inputToken
 			m.inputPrompt = "Enter Real-Debrid private token"
@@ -446,10 +447,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.errText = ""
 			return m, m.input.Focus()
 		case "2", "d":
+			m.retryBootstrap = false
 			m.loading = true
 			m.errText = ""
 			cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return startDeviceCmd(ctx, m.runtime, m.authService) })
 			return m, cmd
+		case "r", "enter":
+			if m.retryBootstrap && !m.auth.InFlight {
+				m.loading = true
+				cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return bootstrapCmd(ctx, m.runtime, m.authService) })
+				return m, cmd
+			}
 		}
 
 	case modeTokenInput, modeMagnetInput, modeURLInput:

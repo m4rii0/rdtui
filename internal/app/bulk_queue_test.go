@@ -192,7 +192,14 @@ func TestQueueAdvancesWithoutUI(t *testing.T) {
 func TestQueueRejectsForeignActiveDownload(t *testing.T) {
 	r := newQueueRig(t, false)
 	foreign := admit(t, r.c, r.b, "foreign")
-	if _, err := r.q.Start(t.Context(), queuePlan(1)); !errors.Is(err, ErrActiveDownload) {
+	result := make(chan error, 1)
+	go func() { _, err := r.q.Start(t.Context(), queuePlan(1)); result <- err }()
+	query := receive(t, r.b.statuses)
+	if query.gid != foreign.Ref.GID {
+		t.Fatalf("observed another transfer: %s", query.gid)
+	}
+	query.reply <- backendResult{download: models.ManagedDownload{Status: models.ManagedDownloadStatusActive}}
+	if err := receive(t, result); !errors.Is(err, ErrActiveDownload) {
 		t.Fatal(err)
 	}
 	current, _ := r.c.Current()

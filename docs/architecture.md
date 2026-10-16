@@ -210,6 +210,10 @@ The device-auth screen retains its code on a typed persistence failure and shows
 the error; existing **r / enter** retries the pending save without new browser
 authorization. Escape still leaves that flow; intentionally authorizing a new
 session replaces its pending state.
+If startup refresh fails to save, the authentication menu likewise exposes
+**r / enter** to retry `Bootstrap`. It saves the retained rotated credentials
+without starting device authorization or refreshing again; the action disappears
+after recovery or when the user chooses replacement authentication.
 
 Missing `auth.json` means no stored credentials. Malformed JSON, permissions, and
 other I/O errors remain distinguishable through `CredentialLoadError`.

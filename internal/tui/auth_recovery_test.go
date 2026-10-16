@@ -90,3 +90,89 @@ func TestInteractiveSaveRecoveryRetainsDeviceRetry(t *testing.T) {
 		})
 	}
 }
+
+type startupRecoveryStore struct {
+	creds models.DeviceCredentials
+	err   error
+}
+
+func (s *startupRecoveryStore) LoadDeviceCredentials() (*models.DeviceCredentials, error) {
+	return new(s.creds), nil
+}
+
+func (s *startupRecoveryStore) SaveDeviceCredentials(creds models.DeviceCredentials) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.creds = creds
+	return nil
+}
+
+type startupRecoveryOAuth struct {
+	recoveryOAuth
+	now       time.Time
+	refreshes int
+}
+
+func (o *startupRecoveryOAuth) RefreshToken(context.Context, string, string, string) (models.DeviceCredentials, error) {
+	o.refreshes++
+	return models.DeviceCredentials{ClientID: "client", ClientSecret: "secret", AccessToken: "rotated-access", RefreshToken: "rotated-refresh", ExpiresAt: o.now.Add(time.Hour)}, nil
+}
+
+func TestStartupSaveRecoveryRetriesWithoutOAuth(t *testing.T) {
+	for _, key := range []rune{'r', tea.KeyEnter} {
+		t.Run(fmt.Sprint(key), func(t *testing.T) {
+			runtime := newTestRuntime(t)
+			now := time.Date(2030, time.October, 16, 12, 0, 0, 0, time.UTC)
+			oauth := &startupRecoveryOAuth{now: now}
+			store := &startupRecoveryStore{err: os.ErrPermission, creds: models.DeviceCredentials{
+				ClientID: "client", ClientSecret: "secret", AccessToken: "old-access", RefreshToken: "old-refresh", ExpiresAt: now.Add(-time.Hour),
+			}}
+			validations := 0
+			manager := auth.NewManager(auth.SessionDependencies{Root: runtime.Context(), Spawn: runtime.Spawn,
+				OAuth: oauth, Credentials: store, Preferences: recoveryPreferences{}, Now: func() time.Time { return now },
+				Validate: func(_ context.Context, token string) (models.User, error) {
+					validations++
+					if store.creds.AccessToken != token || store.creds.RefreshToken != "rotated-refresh" {
+						t.Error("credentials used before pending save succeeded")
+					}
+					return models.User{Username: "device"}, nil
+				}})
+			m := NewModel(Dependencies{Runtime: runtime, Auth: manager})
+			updated, _ := m.Update(bootstrapCmd(runtime.Context(), runtime, manager)())
+			m = updated.(Model)
+			if m.mode != modeAuthChoice || !strings.Contains(m.errText, "not been saved") {
+				t.Fatalf("startup failure hidden: %s %q", m.mode, m.errText)
+			}
+			retry := func() {
+				t.Helper()
+				updated, cmd := m.Update(tea.KeyPressMsg{Code: key})
+				m = updated.(Model)
+				if cmd == nil {
+					t.Fatal("startup persistence has no save-only retry")
+				}
+				_, duplicate := m.Update(tea.KeyPressMsg{Code: key})
+				if duplicate != nil {
+					t.Fatal("overlapping bootstrap retries admitted")
+				}
+				updated, _ = m.Update(cmd())
+				m = updated.(Model)
+			}
+			retry() // Storage remains broken; retain both pending credentials and retry.
+			if validations != 0 || !strings.Contains(renderAuthChoice(m), "Retry saving credentials") {
+				t.Fatal("pending credentials used or recovery action not visible")
+			}
+			store.err = nil
+			retry()
+			if m.mode != modeMain || m.session == nil || m.errText != "" || manager.Snapshot().Method != models.AuthMethodDevice {
+				t.Fatalf("save retry did not recover: %s %+v %q", m.mode, m.session, m.errText)
+			}
+			if oauth.refreshes != 1 || oauth.starts != 0 || oauth.exchanges != 0 || validations != 1 || store.creds.RefreshToken != "rotated-refresh" {
+				t.Fatalf("repeated OAuth/lost rotation: refreshes=%d starts=%d exchanges=%d validations=%d", oauth.refreshes, oauth.starts, oauth.exchanges, validations)
+			}
+			if strings.Contains(renderAuthChoice(m), "Retry saving credentials") {
+				t.Fatal("successful recovery left a stale retry action")
+			}
+		})
+	}
+}

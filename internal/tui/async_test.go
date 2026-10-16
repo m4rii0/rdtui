@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,64 @@ type asyncService struct {
 	listCalls    atomic.Int32
 	resultErr    error
 	requestedRef app.DownloadRef
+}
+
+type handoffBarrierAPI struct {
+	app.BatchAPI
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (s *handoffBarrierAPI) UnrestrictLink(ctx context.Context, _ string) (models.UnrestrictedLink, error) {
+	close(s.entered)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return models.UnrestrictedLink{}, ctx.Err()
+	}
+	return models.UnrestrictedLink{Download: "https://example.com/resolved"}, s.err
+}
+
+func TestIndependentSetupSurvivesQueueAdvance(t *testing.T) {
+	for _, resultErr := range []error{nil, errors.New("resolution failed")} {
+		t.Run(fmt.Sprint(resultErr), func(t *testing.T) {
+			m, queue := observedQueue(t)
+			m.mode = modeDetail
+			m.detail = &models.TorrentInfo{ID: "independent", Status: "downloaded", Links: []string{"source"}}
+			api := &handoffBarrierAPI{entered: make(chan struct{}), release: make(chan struct{}), err: resultErr}
+			m.batches = app.NewBatchService(api, nil, nil)
+			updated, cmd := m.beginHandoff(handoffCopy)
+			m = updated.(Model)
+			done := make(chan tea.Msg, 1)
+			go func() { done <- cmd() }()
+			<-api.entered
+			queue.snapshot.CurrentIndex = 1
+			queue.snapshot.Items[0].Status = app.QueueItemTerminal
+			queue.snapshot.Items[0].Outcome = &app.ItemOutcome{TorrentID: "a", Kind: app.OutcomeSuccess}
+			queue.snapshot.Items[1].Status = app.QueueItemActive
+			m, _ = updateQueue(m, queue.snapshot)
+			close(api.release)
+			msg := <-done
+			updated, _ = m.Update(msg)
+			m = updated.(Model)
+			if m.setup.InFlight || m.loading {
+				t.Fatal("queue advancement discarded the independent setup result")
+			}
+			if resultErr == nil {
+				if m.mode != modeShowURL || m.showURL != "https://example.com/resolved" {
+					t.Fatalf("URL not presented: %s %q", m.mode, m.showURL)
+				}
+			} else if m.errText != resultErr.Error() {
+				t.Fatalf("resolution failure was discarded: %q", m.errText)
+			}
+			m.status = "newer UI state"
+			updated, next := m.Update(msg)
+			if updated.(Model).status != m.status || next != nil {
+				t.Fatal("duplicate setup result changed current state")
+			}
+		})
+	}
 }
 
 func (*asyncService) Current() (app.DownloadSnapshot, bool) { return app.DownloadSnapshot{}, false }

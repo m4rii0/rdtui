@@ -207,6 +207,21 @@ func (c *DownloadCoordinator) runStart(ctx context.Context, cancel context.Cance
 
 // AcquireQueue reserves admission across resolution, confirmation and item gaps.
 func (c *DownloadCoordinator) AcquireQueue(ctx context.Context) (QueueLease, error) {
+	if err := ctx.Err(); err != nil {
+		return QueueLease{}, err
+	}
+	c.mu.Lock()
+	var standalone DownloadRef
+	if !c.closing && c.lease.ID == 0 && c.start == nil && c.current != nil && !c.current.Download.IsTerminal() {
+		standalone = c.current.Ref
+	}
+	c.mu.Unlock()
+	if standalone != (DownloadRef{}) {
+		// A single transfer may finish after navigation stops UI polling. Observe
+		// outside the admission lock, then revalidate all ownership below. A
+		// failed observation retains the active slot and can be retried later.
+		_, _ = c.Status(ctx, standalone)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {

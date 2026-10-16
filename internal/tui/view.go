@@ -46,6 +46,9 @@ func renderAuthChoice(m Model) string {
 		"",
 		mutedStyle.Render("  q  quit"),
 	}
+	if m.retryBootstrap {
+		lines = append(lines, "", "  "+footerKeyStyle.Render("r / enter")+"  "+textStyle.Render("Retry saving credentials"))
+	}
 	if m.errText != "" {
 		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}

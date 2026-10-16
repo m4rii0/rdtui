@@ -26,11 +26,12 @@ type AuthState interface {
 }
 
 type authModel struct {
-	authService AuthService
-	authState   AuthState
-	auth        asyncRequest
-	session     *models.AuthSession
-	deviceCode  *models.DeviceCode
+	authService    AuthService
+	authState      AuthState
+	auth           asyncRequest
+	session        *models.AuthSession
+	deviceCode     *models.DeviceCode
+	retryBootstrap bool
 }
 
 // The root owns navigation/overlays; the feature owns authentication state and
@@ -38,6 +39,8 @@ type authModel struct {
 func (a *authModel) update(m *Model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case bootstrapMsg:
+		a.auth.invalidate()
+		a.retryBootstrap = false
 		m.loading = false
 		if msg.err == nil {
 			a.session = msg.session
@@ -47,11 +50,15 @@ func (a *authModel) update(m *Model, msg tea.Msg) tea.Cmd {
 			return m.refresh()
 		}
 		m.mode = modeAuthChoice
+		m.status = "Choose an authentication method"
 		if errors.Is(msg.err, auth.ErrNoValidCredentials) {
-			m.status = "Choose an authentication method"
 			m.errText = ""
 		} else {
 			m.errText = msg.err.Error()
+			if _, ok := errors.AsType[*auth.CredentialPersistenceError](msg.err); ok {
+				a.retryBootstrap = true
+				m.status = "Retry saving credentials with r or enter"
+			}
 		}
 	case authMsg:
 		a.auth.invalidate()

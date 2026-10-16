@@ -59,15 +59,14 @@ type queueIdentity struct {
 type featureResultMsg struct {
 	feature asyncFeature
 	request requestID
-	queue   queueIdentity
 	msg     tea.Msg
 }
 
-func featureCmd(cmd tea.Cmd, feature asyncFeature, request requestID, queue queueIdentity) tea.Cmd {
+func featureCmd(cmd tea.Cmd, feature asyncFeature, request requestID) tea.Cmd {
 	if cmd == nil {
 		return nil
 	}
-	return func() tea.Msg { return featureResultMsg{feature, request, queue, cmd()} }
+	return func() tea.Msg { return featureResultMsg{feature, request, cmd()} }
 }
 
 func (m *Model) feature(feature asyncFeature) *asyncRequest {
@@ -90,7 +89,9 @@ func (m *Model) queueIdentity() queueIdentity {
 
 func (m *Model) beginFeature(feature asyncFeature, makeCmd func(context.Context) tea.Cmd) tea.Cmd {
 	ctx, request := m.feature(feature).begin(m.runtime.Context())
-	return featureCmd(makeCmd(ctx), feature, request, m.queueIdentity())
+	// Feature requests are independent of the application-owned queue. Queue
+	// observations and decisions carry their own identities at their boundary.
+	return featureCmd(makeCmd(ctx), feature, request)
 }
 
 func (m *Model) refresh() tea.Cmd {
