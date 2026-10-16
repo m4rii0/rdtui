@@ -28,34 +28,38 @@ type columnSpec struct {
 }
 
 func tableColumns(totalWidth int, showScrollbar bool) []columnSpec {
-	statusW := 10
-	progressW := 6
-	sizeW := 9
-	addedW := 16
-	scrollW := 0
 	if showScrollbar {
-		scrollW = 2
+		totalWidth -= 2
 	}
-	used := statusW + progressW + sizeW + addedW + 4 + scrollW
-	nameW := totalWidth - used
-	if nameW < 8 {
-		statusW = 8
-		progressW = 5
-		sizeW = 8
-		addedW = 8
-		used = statusW + progressW + sizeW + addedW + 4 + scrollW
-		nameW = totalWidth - used
+	totalWidth = max(0, totalWidth)
+	if totalWidth < 3 {
+		return []columnSpec{{Index: colName, Label: "Name", Width: totalWidth}}
 	}
-	if nameW < 4 {
-		nameW = 4
+	statusW := 10
+	if totalWidth < 40 {
+		statusW = min(6, max(1, totalWidth/3))
 	}
-	return []columnSpec{
-		{Index: colStatus, Label: "Status", Width: statusW},
-		{Index: colProgress, Label: "%", Width: progressW, AlignRight: true},
-		{Index: colSize, Label: "Size", Width: sizeW, AlignRight: true},
-		{Index: colName, Label: "Name", Width: nameW},
-		{Index: colAdded, Label: "Added", Width: addedW, AlignRight: true},
+	cols := []columnSpec{{Index: colStatus, Label: "Status", Width: statusW}}
+	if totalWidth >= 40 {
+		cols = append(cols, columnSpec{Index: colProgress, Label: "%", Width: 6, AlignRight: true})
 	}
+	if totalWidth >= 60 {
+		cols = append(cols, columnSpec{Index: colSize, Label: "Size", Width: 9, AlignRight: true})
+	}
+	cols = append(cols, columnSpec{Index: colName, Label: "Name"})
+	if totalWidth >= 80 {
+		cols = append(cols, columnSpec{Index: colAdded, Label: "Added", Width: 16, AlignRight: true})
+	}
+	remaining := totalWidth - (len(cols) - 1)
+	for _, col := range cols {
+		remaining -= col.Width
+	}
+	for i := range cols {
+		if cols[i].Index == colName {
+			cols[i].Width = max(0, remaining)
+		}
+	}
+	return cols
 }
 
 func columnLabel(col int) string {
@@ -163,6 +167,9 @@ func renderTableRow(torrent models.Torrent, columns []columnSpec, matchIndices [
 		switch col.Index {
 		case colStatus:
 			plain := statusLabelPlain(torrent.Status)
+			if col.Width <= 6 {
+				plain = statusLabelForSearch(torrent.Status)
+			}
 			if fm != nil {
 				plain = highlightChars(plain, fm[colStatus], matchHighlightStyle)
 			}
