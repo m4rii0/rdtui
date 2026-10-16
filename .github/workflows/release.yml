@@ -30,7 +30,7 @@ permissions:
 jobs:
   prepare:
     name: Calculate next version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-slim
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
     steps:
