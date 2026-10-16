@@ -187,7 +187,7 @@ func (c *Client) AddMagnet(ctx context.Context, magnet string) (models.AddTorren
 	if err != nil {
 		return out, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if err := c.decodeResponse(resp, &out, http.StatusCreated); err != nil {
 		return out, err
 	}
@@ -209,7 +209,7 @@ func (c *Client) AddTorrentFile(ctx context.Context, filename string, data []byt
 	if err != nil {
 		return out, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if err := c.decodeResponse(resp, &out, http.StatusCreated); err != nil {
 		return out, err
 	}
@@ -233,7 +233,7 @@ func (c *Client) AddTorrentURL(ctx context.Context, torrentURL string) (models.A
 	if err != nil {
 		return models.AddTorrentResult{}, fmt.Errorf("fetch torrent url: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return models.AddTorrentResult{}, &apiError{StatusCode: resp.StatusCode, Message: "failed to fetch torrent url"}
 	}
@@ -260,7 +260,7 @@ func (c *Client) SelectFiles(ctx context.Context, torrentID string, fileIDs []in
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return c.expectStatus(resp, http.StatusNoContent, http.StatusAccepted)
 }
 
@@ -270,7 +270,7 @@ func (c *Client) DeleteTorrent(ctx context.Context, torrentID string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return c.expectStatus(resp, http.StatusNoContent)
 }
 
@@ -301,7 +301,7 @@ func (c *Client) PollDeviceCredentials(ctx context.Context, clientID, deviceCode
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		var apiErr ErrorResponse
@@ -363,7 +363,7 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Re
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return c.decodeResponse(resp, target, http.StatusOK)
 }
 

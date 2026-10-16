@@ -8,19 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func renderOverlay(termW, termH int, content string) string {
-	if termW <= 0 {
-		termW = 80
-	}
-	if termH <= 0 {
-		termH = 24
-	}
-	if termW < 40 || termH < 12 {
-		return content
-	}
-	return lipgloss.Place(termW, termH, lipgloss.Center, lipgloss.Center, content)
-}
-
 func renderOverlayOnBackground(bg, popup string, termW, termH int) string {
 	if termW <= 0 {
 		termW = 80
@@ -137,23 +124,22 @@ func renderPopupContent(m Model) string {
 }
 
 func renderBackground(m Model) string {
-	switch {
-	case m.mode == modeStarting:
+	switch m.mode {
+	case modeStarting:
 		return "Starting..."
-	case m.mode == modeAuthChoice:
+	case modeAuthChoice:
 		return renderAuthChoice(m)
-	case m.mode == modeTokenInput:
+	case modeTokenInput:
 		return renderInput(m)
-	case m.mode == modeDeviceAuth:
+	case modeDeviceAuth:
 		return renderDeviceAuth(m)
-	case m.mode == modeDetail:
+	case modeDetail:
 		return renderDetailView(m)
-	case m.mode == modeDownload:
+	case modeDownload:
 		return renderDownloadView(m)
-	case m.mode == modeBulkDownload:
+	case modeBulkDownload:
 		return renderBulkDownloadView(m)
-	case m.mode == modeMain, m.mode == modeSearch,
-		m.mode == modeMagnetInput, m.mode == modeURLInput:
+	case modeMain, modeSearch, modeMagnetInput, modeURLInput:
 		return renderMain(m)
 	default:
 		if m.returnMode == modeDetail {

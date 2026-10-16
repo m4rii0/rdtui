@@ -112,7 +112,7 @@ func (m *Manager) runDownload(ctx context.Context, state *downloadState) {
 		state.fail(err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		state.fail(fmt.Errorf("download request failed: %s", resp.Status))
@@ -125,7 +125,8 @@ func (m *Manager) runDownload(ctx context.Context, state *downloadState) {
 		state.fail(fmt.Errorf("create download file: %w", err))
 		return
 	}
-	defer file.Close()
+	// Best-effort cleanup on error; successful downloads check Close below.
+	defer func() { _ = file.Close() }()
 
 	state.update(func(download *models.ManagedDownload) {
 		download.Status = models.ManagedDownloadStatusActive
@@ -162,6 +163,10 @@ func (m *Manager) runDownload(ctx context.Context, state *downloadState) {
 			continue
 		}
 		if readErr == io.EOF {
+			if err := file.Close(); err != nil {
+				state.fail(fmt.Errorf("close download file: %w", err))
+				return
+			}
 			state.update(func(download *models.ManagedDownload) {
 				if download.TotalLength == 0 {
 					download.TotalLength = download.CompletedLength

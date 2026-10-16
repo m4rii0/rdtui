@@ -403,10 +403,6 @@ func downloadFooter(download *models.ManagedDownload, canDeleteTorrent bool) str
 	return renderShortcutFooter(m.renderShortcutDefs(), m)
 }
 
-func statusLabel(status string) string {
-	return styledStatusLabel(status, statusLabelPlain(status))
-}
-
 func managedDownloadStatusLabel(status models.ManagedDownloadStatus) string {
 	text := string(status)
 	if text == "" {
@@ -601,17 +597,6 @@ func fitLines(lines []string, height int) []string {
 		lines = append(lines, "")
 	}
 	return lines
-}
-
-func truncateLines(lines []string, width int) []string {
-	if width <= 0 {
-		return lines
-	}
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, truncateLine(line, width))
-	}
-	return out
 }
 
 func truncateLine(line string, width int) string {

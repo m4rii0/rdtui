@@ -134,7 +134,7 @@ func newReleaseServer(t *testing.T, asset []byte, badChecksum bool) *httptest.Se
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/m4rii0/rdtui/releases/latest":
-			fmt.Fprintf(w, `{
+			_, _ = fmt.Fprintf(w, `{
 				"tag_name":"v1.2.0",
 				"assets":[
 					{"name":"rdtui-linux-amd64","browser_download_url":"%s/rdtui-linux-amd64"},
@@ -149,8 +149,8 @@ func newReleaseServer(t *testing.T, asset []byte, badChecksum bool) *httptest.Se
 			if badChecksum {
 				digest = fmt.Sprintf("%x", sha256.Sum256([]byte("different")))
 			}
-			fmt.Fprintf(w, "%s  rdtui-linux-amd64\n", digest)
-			fmt.Fprintf(w, "%s  rdtui-windows-amd64.exe\n", digest)
+			_, _ = fmt.Fprintf(w, "%s  rdtui-linux-amd64\n", digest)
+			_, _ = fmt.Fprintf(w, "%s  rdtui-windows-amd64.exe\n", digest)
 		default:
 			http.NotFound(w, r)
 		}

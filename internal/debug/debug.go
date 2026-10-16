@@ -25,11 +25,14 @@ func Init() {
 		dir = os.TempDir()
 	}
 	dir = filepath.Join(dir, "rdtui")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "debug: cannot create %s: %v\n", dir, err)
+		return
+	}
 	path := filepath.Join(dir, "debug.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "debug: cannot open %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(os.Stderr, "debug: cannot open %s: %v\n", path, err)
 		return
 	}
 	writer = f
@@ -45,5 +48,6 @@ func Log(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
 	ts := time.Now().Format("15:04:05.000")
-	fmt.Fprintf(writer, "[%s] %s\n", ts, fmt.Sprintf(format, args...))
+	// Debug output is best-effort and must not interrupt the application.
+	_, _ = fmt.Fprintf(writer, "[%s] %s\n", ts, fmt.Sprintf(format, args...))
 }

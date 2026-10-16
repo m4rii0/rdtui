@@ -34,9 +34,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	err := root.Execute()
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		// Reporting is best-effort: there is no other output if stderr fails.
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		if isUsageError(err) {
-			fmt.Fprintf(stderr, "\n%s", root.UsageString())
+			_, _ = fmt.Fprintf(stderr, "\n%s", root.UsageString())
 			return 2
 		}
 		return 1
@@ -67,8 +68,8 @@ func runTUI() error {
 }
 
 func printVersion(stdout io.Writer) error {
-	fmt.Fprintf(stdout, "rdtui %s\n", version.Current())
-	return nil
+	_, err := fmt.Fprintf(stdout, "rdtui %s\n", version.Current())
+	return err
 }
 
 func runCheckUpdate(ctx context.Context, stdout io.Writer) error {
@@ -77,13 +78,11 @@ func runCheckUpdate(ctx context.Context, stdout io.Writer) error {
 		return fmt.Errorf("check update failed: %w", err)
 	}
 	if res.UpdateAvailable {
-		fmt.Fprintf(stdout, "rdtui %s is available (current %s)\n", res.LatestVersion, res.CurrentVersion)
-		fmt.Fprintf(stdout, "asset: %s\n", res.AssetName)
-		fmt.Fprintln(stdout, "run: rdtui update")
-		return nil
+		_, err := fmt.Fprintf(stdout, "rdtui %s is available (current %s)\nasset: %s\nrun: rdtui update\n", res.LatestVersion, res.CurrentVersion, res.AssetName)
+		return err
 	}
-	fmt.Fprintf(stdout, "rdtui is up to date (%s)\n", res.CurrentVersion)
-	return nil
+	_, err = fmt.Fprintf(stdout, "rdtui is up to date (%s)\n", res.CurrentVersion)
+	return err
 }
 
 func runUpdate(ctx context.Context, stdout io.Writer, opts updateOptions) error {
@@ -95,21 +94,20 @@ func runUpdate(ctx context.Context, stdout io.Writer, opts updateOptions) error 
 		return fmt.Errorf("update failed: %w", err)
 	}
 	if !res.UpdateAvailable {
-		fmt.Fprintf(stdout, "rdtui is up to date (%s); no update installed\n", res.CurrentVersion)
-		return nil
+		_, err := fmt.Fprintf(stdout, "rdtui is up to date (%s); no update installed\n", res.CurrentVersion)
+		return err
 	}
 	if opts.DryRun {
-		fmt.Fprintf(stdout, "would update rdtui from %s to %s using %s; no files changed\n", res.CurrentVersion, res.LatestVersion, res.AssetName)
-		return nil
+		_, err := fmt.Fprintf(stdout, "would update rdtui from %s to %s using %s; no files changed\n", res.CurrentVersion, res.LatestVersion, res.AssetName)
+		return err
 	}
 	if res.WindowsManual {
-		fmt.Fprintf(stdout, "verified update downloaded: %s\n", res.ReplacementPath)
-		fmt.Fprintf(stdout, "replace current executable manually: %s\n", res.TargetPath)
-		return nil
+		_, err := fmt.Fprintf(stdout, "verified update downloaded: %s\nreplace current executable manually: %s\n", res.ReplacementPath, res.TargetPath)
+		return err
 	}
 	if res.Installed {
-		fmt.Fprintf(stdout, "updated rdtui from %s to %s\n", res.CurrentVersion, res.LatestVersion)
-		return nil
+		_, err := fmt.Fprintf(stdout, "updated rdtui from %s to %s\n", res.CurrentVersion, res.LatestVersion)
+		return err
 	}
 	return fmt.Errorf("update did not complete")
 }

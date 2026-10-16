@@ -410,17 +410,6 @@ func (b *bulkDownloadState) selectedTorrentCount() int {
 	return len(seen)
 }
 
-func (b *bulkDownloadState) totalSelectedFiles() int {
-	if b == nil {
-		return 0
-	}
-	count := 0
-	for _, plan := range b.Plans {
-		count += len(plan.Selected)
-	}
-	return count
-}
-
 func (b *bulkDownloadState) planFileCount(plan bulkTorrentPlan) int {
 	return len(plan.Selected)
 }

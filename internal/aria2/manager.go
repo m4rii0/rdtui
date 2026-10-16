@@ -375,7 +375,7 @@ func choosePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	addr, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
 		return 0, errors.New("unexpected tcp address")

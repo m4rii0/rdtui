@@ -1991,10 +1991,6 @@ func handoffCmd(service app.AppService, target models.DownloadTarget) tea.Cmd {
 		if url == "" {
 			url = unrestricted.Link
 		}
-		filename := unrestricted.Filename
-		if filename == "" {
-			filename = target.Label
-		}
 		copied, err := service.CopyURL(url)
 		return handoffMsg{result: models.HandoffResult{URL: url, Copied: copied}, err: err}
 	}

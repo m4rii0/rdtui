@@ -258,7 +258,6 @@ func (s *Service) ManagedDownloadStatus(_ context.Context) (models.ManagedDownlo
 
 	progress := time.Since(s.downloadStart).Seconds() / s.downloadDuration.Seconds()
 	if progress >= 1.0 {
-		progress = 1.0
 		s.activeDownload.Status = models.ManagedDownloadStatusComplete
 		s.activeDownload.CompletedLength = s.activeDownload.TotalLength
 		s.activeDownload.DownloadSpeed = 0
@@ -377,13 +376,6 @@ func generateFiles(name string, totalBytes int64) []models.TorrentFile {
 	return []models.TorrentFile{
 		{ID: 1, Path: "/" + name, Bytes: totalBytes, Selected: true},
 	}
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func randSize() int64 {

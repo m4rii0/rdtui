@@ -41,7 +41,6 @@ var (
 	// Table rows
 	selectedStyle     = lipgloss.NewStyle().Foreground(colorAmber).Background(colorPurplBg).Bold(true)
 	batchMarkedStyle  = lipgloss.NewStyle().Foreground(colorAmber).Background(colorDarkBg)
-	altRowStyle       = lipgloss.NewStyle().Background(lipgloss.ANSIColor(235))
 	headerRowStyle    = lipgloss.NewStyle().Foreground(colorText).Bold(true)
 	headerSelColStyle = lipgloss.NewStyle().Foreground(colorNeon).Bold(true).Underline(true)
 
@@ -134,19 +133,4 @@ func dividerLine(width int) string {
 		line += "─"
 	}
 	return subtleStyle.Render(line)
-}
-
-// sectionDivider renders:  ─── Label ───
-func sectionDivider(label string, width int) string {
-	if label == "" {
-		return dividerLine(width)
-	}
-	decorated := "── " + label + " ──"
-	padLen := width - len([]rune(decorated))
-	if padLen > 0 {
-		for i := 0; i < padLen; i++ {
-			decorated += "─"
-		}
-	}
-	return subtleStyle.Render(decorated)
 }

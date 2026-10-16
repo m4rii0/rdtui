@@ -117,8 +117,8 @@ func (b *bulkFileSelectionState) prepareNextPrompt(start int) bool {
 	if b == nil {
 		return false
 	}
-	for idx := start; idx < len(b.Plans); idx++ {
-		b.Prompt = idx
+	if start >= 0 && start < len(b.Plans) {
+		b.Prompt = start
 		b.FileCursor = 0
 		return true
 	}
