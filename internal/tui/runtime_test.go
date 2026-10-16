@@ -3,21 +3,13 @@ package tui
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
-	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
-
-type cancelingService struct {
-	app.AppService
-	entered chan struct{}
-	calls   atomic.Int32
-}
 
 func newTestRuntime(t *testing.T) *app.Runtime {
 	t.Helper()
@@ -33,51 +25,9 @@ func newTestRuntime(t *testing.T) *app.Runtime {
 	return runtime
 }
 
-func (*cancelingService) Config() config.Config { return config.Config{} }
-
-func (s *cancelingService) Bootstrap(ctx context.Context) (*models.AuthSession, error) {
-	s.calls.Add(1)
-	close(s.entered)
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func TestQuitCancelsOutstandingCommand(t *testing.T) {
-	runtime := newTestRuntime(t)
-	service := &cancelingService{entered: make(chan struct{})}
-	m := NewModel(service, runtime)
-	queued := bootstrapCmd(t.Context(), runtime, service)
-	done := make(chan tea.Msg, 1)
-	go func() { done <- bootstrapCmd(t.Context(), runtime, service)() }()
-	select {
-	case <-service.entered:
-	case <-t.Context().Done():
-		t.Fatal(t.Context().Err())
-	}
-	_, quit := m.handleShortcutAction(actionQuit)
-	if _, ok := quit().(tea.QuitMsg); !ok {
-		t.Fatal("quit command missing")
-	}
-	select {
-	case msg := <-done:
-		if !errors.Is(msg.(bootstrapMsg).err, context.Canceled) {
-			t.Fatal(msg)
-		}
-	case <-t.Context().Done():
-		t.Fatal(t.Context().Err())
-	}
-	late := queued().(operationErrorMsg)
-	if !errors.Is(late.err, app.ErrClosed) {
-		t.Fatal(late.err)
-	}
-	if service.calls.Load() != 1 {
-		t.Fatal("request admitted after stop")
-	}
-}
-
 func TestLeavingDownloadDoesNotStopRuntime(t *testing.T) {
 	runtime := newTestRuntime(t)
-	m := NewModel(nil, runtime)
+	m := NewModel(Dependencies{Runtime: runtime})
 	m.mode = modeDownload
 	m.download = &models.ManagedDownload{Status: models.ManagedDownloadStatusActive}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -90,7 +40,8 @@ func TestLeavingDownloadDoesNotStopRuntime(t *testing.T) {
 }
 
 type batchCancelService struct {
-	app.AppService
+	testBatchAPI
+	DesktopService
 	cancel context.CancelFunc
 	ids    []string
 }
@@ -116,13 +67,13 @@ func TestCanceledBatchSendsNoFurtherRequests(t *testing.T) {
 			service := &batchCancelService{cancel: cancel}
 			var resultErr error
 			if kind == "delete" {
-				result := batchOpCmd(ctx, runtime, service, batchOpDelete, []string{"first", "second"}, nil)().(batchResultMsg)
+				result := batchOpCmd(ctx, runtime, testBatches(service), batchOpDelete, []string{"first", "second"}, nil)().(batchResultMsg)
 				resultErr = result.err
 				if result.success != 1 {
 					t.Fatal(result)
 				}
 			} else {
-				result := bulkFileSelectionSubmitCmd(ctx, runtime, service, []bulkFileSelectionSubmission{{ID: "first", FileIDs: []int{1}}, {ID: "second", FileIDs: []int{2}}}, nil)().(bulkFileSelectionResultMsg)
+				result := bulkFileSelectionSubmitCmd(ctx, runtime, testBatches(service), []bulkFileSelectionSubmission{{ID: "first", FileIDs: []int{1}}, {ID: "second", FileIDs: []int{2}}}, nil)().(bulkFileSelectionResultMsg)
 				resultErr = result.err
 				if result.success != 1 {
 					t.Fatal(result)

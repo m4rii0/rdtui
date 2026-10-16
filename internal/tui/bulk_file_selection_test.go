@@ -9,7 +9,7 @@ import (
 func TestBulkFileSelectionCommandCopiesNestedIDs(t *testing.T) {
 	service := &bulkFileSelectionTestService{}
 	submissions := []bulkFileSelectionSubmission{{ID: "a", FileIDs: []int{7}}}
-	cmd := bulkFileSelectionSubmitCmd(t.Context(), newTestRuntime(t), service, submissions, nil)
+	cmd := bulkFileSelectionSubmitCmd(t.Context(), newTestRuntime(t), testBatches(service), submissions, nil)
 	submissions[0].FileIDs[0] = 99
 	submissions[0].ID = "changed"
 	result := cmd().(bulkFileSelectionResultMsg)

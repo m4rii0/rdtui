@@ -58,13 +58,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
-	var service app.AppService
-	var queue tui.BulkQueueService
+	deps := tui.Dependencies{Runtime: runtime}
 	var closeService func(context.Context) error
 	if os.Getenv("RDTUI_DEMO") == "1" {
 		svc := demo.NewService(runtime.Context())
-		service = svc
-		queue = svc.NewBulkQueue(runtime)
+		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc, downloadAdapter{svc}, svc
+		deps.Batches, deps.Bulk, deps.PrepareDownload = svc.NewBatches(), svc.NewBulkQueue(runtime), svc.PrepareDownload
 		closeService = svc.CloseContext
 	} else {
 		svc, err := app.New(runtime.Context())
@@ -72,17 +71,30 @@ func runTUI(ctx context.Context, runtime *app.Runtime) (err error) {
 			return fmt.Errorf("failed to initialize app: %w", err)
 		}
 		closeService = svc.CloseContext
-		service = svc
-		queue = svc.NewBulkQueue(runtime)
+		deps.Auth, deps.Torrents, deps.Downloads, deps.Desktop = svc, svc.Torrents(), downloadAdapter{svc}, svc
+		deps.Batches, deps.Bulk, deps.PrepareDownload = svc.NewBatches(), svc.NewBulkQueue(runtime), svc.PrepareDownload
 	}
 	defer func() { err = errors.Join(err, cleanupRuntime(runtime, closeService)) }()
 
-	program := tea.NewProgram(tui.NewModel(service, runtime, queue), tea.WithContext(ctx))
+	program := tea.NewProgram(tui.NewModel(deps), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("rdtui error: %w", err)
 	}
 	return nil
 }
+
+// Keep the old facade's method name out of consuming feature interfaces.
+type downloadAdapter struct {
+	downloadFacade
+}
+
+type downloadFacade interface {
+	Start(context.Context, string, string) (app.DownloadStart, error)
+	Status(context.Context, app.DownloadRef) (app.DownloadSnapshot, error)
+	CurrentDownload() (app.DownloadSnapshot, bool)
+}
+
+func (a downloadAdapter) Current() (app.DownloadSnapshot, bool) { return a.CurrentDownload() }
 
 func cleanupRuntime(runtime *app.Runtime, closeService func(context.Context) error) error {
 	runtime.Stop()

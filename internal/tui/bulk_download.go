@@ -19,6 +19,7 @@ type BulkQueueService interface {
 	Start(context.Context, app.BulkPlan) (app.QueueID, error)
 	Snapshot(app.QueueID) (app.QueueSnapshot, error)
 	Decide(context.Context, app.QueueDecision) error
+	Cancel(app.QueueID) error
 }
 
 type bulkStartedMsg struct {
@@ -65,12 +66,8 @@ func (m Model) startBulkQueue() (tea.Model, tea.Cmd) {
 		id, err := m.bulkQueue.Start(ctx, plan)
 		msg := bulkStartedMsg{generation: generation, queueID: id, err: err}
 		if errors.Is(err, app.ErrActiveDownload) {
-			if reader, ok := m.service.(interface {
-				CurrentDownload() (app.DownloadSnapshot, bool)
-			}); ok {
-				if current, exists := reader.CurrentDownload(); exists {
-					msg.active = new(current)
-				}
+			if current, exists := m.downloads.Current(); exists {
+				msg.active = new(current)
 			}
 		}
 		return msg

@@ -41,7 +41,7 @@ func (s *queueServiceSpy) Cancel(app.QueueID) error { s.cancelCalls++; return ni
 func observedQueue(t *testing.T) (Model, *queueServiceSpy) {
 	t.Helper()
 	s := &queueServiceSpy{}
-	m := NewModel(nil, newTestRuntime(t), s)
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t), Bulk: s})
 	m.mode = modeBulkDownload
 	m.bulk = newBulkDownloadState([]models.Torrent{{ID: "a", Filename: "complete"}, {ID: "b", Filename: "partial"}})
 	m.bulk.QueueID = 7
@@ -178,7 +178,7 @@ func TestBulkLateSnapshotIgnored(t *testing.T) {
 func TestBulkRefreshObservesQueue(t *testing.T) {
 	m, s := observedQueue(t)
 	backend := &bulkStatusSpy{}
-	m.service = backend
+	m.downloads = backend
 	m.download = &models.ManagedDownload{GID: "a", Status: models.ManagedDownloadStatusActive}
 	updated, cmd := m.handleShortcutAction(actionRefresh)
 	m = updated.(Model)
@@ -197,9 +197,11 @@ func TestBulkRefreshObservesQueue(t *testing.T) {
 }
 
 type bulkStatusSpy struct {
-	app.AppService
+	DownloadService
 	calls int
 }
+
+func (*bulkStatusSpy) Current() (app.DownloadSnapshot, bool) { return app.DownloadSnapshot{}, false }
 
 func (s *bulkStatusSpy) Status(context.Context, app.DownloadRef) (app.DownloadSnapshot, error) {
 	s.calls++
@@ -281,7 +283,7 @@ func TestBulkApplicationRunsWithoutPresentation(t *testing.T) {
 	q := app.NewBulkQueue(app.QueueDependencies{Runtime: r, Downloads: c, Prepare: func(ctx context.Context, target models.DownloadTarget) (app.PreparedDownload, error) {
 		return app.PreparedDownload{URL: target.Link, Filename: target.Label}, ctx.Err()
 	}})
-	m := NewModel(nil, r, q)
+	m := NewModel(Dependencies{Runtime: r, Bulk: q})
 	m.mode = modeBulkConfirm
 	m.bulk = newBulkDownloadState([]models.Torrent{{ID: "b"}, {ID: "a"}})
 	m.bulk.Plans[0].Targets = []models.DownloadTarget{{Link: "b", Label: "b.iso"}, {Link: "unselected", Label: "skip.iso"}}

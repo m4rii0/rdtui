@@ -9,13 +9,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
-	"github.com/m4rii0/rdtui/internal/config"
 	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
 
 type asyncService struct {
-	app.AppService
+	AuthService
+	TorrentService
+	DownloadService
 	entered      chan context.Context
 	release      chan struct{}
 	statusCalls  atomic.Int32
@@ -23,6 +24,8 @@ type asyncService struct {
 	resultErr    error
 	requestedRef app.DownloadRef
 }
+
+func (*asyncService) Current() (app.DownloadSnapshot, bool) { return app.DownloadSnapshot{}, false }
 
 func currentDownloadResult(m Model, download models.ManagedDownload, err error) managedDownloadStatusMsg {
 	return managedDownloadStatusMsg{request: downloadRequestID{requestID{m.downloadPoll.Generation}, m.downloadRef}, queue: m.queueIdentity(), ok: true, download: download, err: err}
@@ -32,7 +35,6 @@ func currentSetupResult(m Model, msg tea.Msg) featureResultMsg {
 	return featureResultMsg{feature: setupFeature, request: requestID{m.setup.Generation}, queue: m.queueIdentity(), msg: msg}
 }
 
-func (*asyncService) Config() config.Config { return config.Config{} }
 func (s *asyncService) Status(ctx context.Context, ref app.DownloadRef) (app.DownloadSnapshot, error) {
 	s.statusCalls.Add(1)
 	s.requestedRef = ref
@@ -116,7 +118,7 @@ func TestLateDownloadResultIgnored(t *testing.T) {
 
 func asyncQueue(t *testing.T) Model {
 	t.Helper()
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode, m.returnMode = modeBulkDownload, modeBulkDownload
 	m.bulk = newBulkDownloadState([]models.Torrent{{ID: "a"}, {ID: "b"}, {ID: "c"}})
 	m.bulk.Items = []bulkQueueItem{{TorrentID: "a", Status: bulkFileActive}, {TorrentID: "b", Status: bulkFilePending}, {TorrentID: "c", Status: bulkFilePending}}
@@ -143,7 +145,7 @@ func TestDuplicateTerminalResultIgnored(t *testing.T) {
 
 func TestDownloadPollingSingleFlight(t *testing.T) {
 	s := &asyncService{entered: make(chan context.Context, 2), release: make(chan struct{})}
-	m := NewModel(s, newTestRuntime(t))
+	m := NewModel(asyncDependencies(t, s))
 	m.mode = modeDownload
 	m.download = &models.ManagedDownload{GID: "current", Status: models.ManagedDownloadStatusActive}
 	m.downloadRef = app.DownloadRef{Generation: 7, GID: "current"}
@@ -163,7 +165,7 @@ func TestDownloadPollingSingleFlight(t *testing.T) {
 
 func TestListPollingSingleFlight(t *testing.T) {
 	s := &asyncService{entered: make(chan context.Context, 2), release: make(chan struct{})}
-	m := NewModel(s, newTestRuntime(t))
+	m := NewModel(asyncDependencies(t, s))
 	m.mode = modeMain
 	updated, cmd := m.Update(tickMsg{})
 	m = updated.(Model)
@@ -181,7 +183,7 @@ func TestListPollingSingleFlight(t *testing.T) {
 
 func TestCanceledAuthResultIgnored(t *testing.T) {
 	s := &asyncService{entered: make(chan context.Context, 1), release: make(chan struct{})}
-	m := NewModel(s, newTestRuntime(t))
+	m := NewModel(asyncDependencies(t, s))
 	m.mode, m.inputAction = modeTokenInput, inputToken
 	m.input.SetValue("token")
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -203,7 +205,7 @@ func TestCanceledAuthResultIgnored(t *testing.T) {
 func TestOldDetailErrorDoesNotReplaceCurrent(t *testing.T) {
 	for _, identity := range []string{"other-torrent", "same-torrent-old-generation"} {
 		t.Run(identity, func(t *testing.T) {
-			m := NewModel(nil, newTestRuntime(t))
+			m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 			m.mode = modeMain
 			m.torrents = []models.Torrent{{ID: "current"}}
 			m.detail = &models.TorrentInfo{ID: "current"}
@@ -231,7 +233,7 @@ func TestSupersededRequestsCanceled(t *testing.T) {
 				if response == "error" {
 					s.resultErr = errors.New("obsolete error")
 				}
-				m := NewModel(s, newTestRuntime(t))
+				m := NewModel(asyncDependencies(t, s))
 				m.mode = modeMain
 				m.torrents = []models.Torrent{{ID: "old"}, {ID: "current"}}
 				var cmd tea.Cmd
@@ -294,7 +296,7 @@ func TestPollingSchedulesAfterCompletion(t *testing.T) {
 	for _, feature := range []string{"download", "list"} {
 		t.Run(feature, func(t *testing.T) {
 			s := &asyncService{entered: make(chan context.Context, 1), release: make(chan struct{}), resultErr: errors.New("temporary observation failure")}
-			m := NewModel(s, newTestRuntime(t))
+			m := NewModel(asyncDependencies(t, s))
 			m.mode = modeMain
 			m.download = &models.ManagedDownload{GID: "current", Filename: "keep.mkv", Status: models.ManagedDownloadStatusActive}
 			var delays []time.Duration
@@ -349,7 +351,7 @@ func TestPollingSchedulesAfterCompletion(t *testing.T) {
 
 func TestDevicePollsUseNewIdentity(t *testing.T) {
 	s := &asyncService{entered: make(chan context.Context, 1), release: make(chan struct{})}
-	m := NewModel(s, newTestRuntime(t))
+	m := NewModel(asyncDependencies(t, s))
 	m.mode = modeDeviceAuth
 	m.deviceCode = &models.DeviceCode{RequestedAt: time.Now(), ExpiresIn: 100, Interval: 1}
 	m.schedule = func(_ time.Duration, msg tea.Msg) tea.Cmd { return func() tea.Msg { return msg } }
@@ -387,7 +389,7 @@ func TestQueueIdentitySurvivesNavigation(t *testing.T) {
 
 func TestNewTargetPickerCancelsPreviousSetup(t *testing.T) {
 	s := &asyncService{entered: make(chan context.Context, 1), release: make(chan struct{})}
-	m := NewModel(s, newTestRuntime(t))
+	m := NewModel(asyncDependencies(t, s))
 	m.mode = modeMain
 	cmd := m.resolveDownload(models.DownloadTarget{Link: "old"})
 	done := make(chan tea.Msg, 1)

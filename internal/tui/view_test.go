@@ -233,7 +233,7 @@ func TestBrowserFooterKeepsImportVisibleWhenUnavailable(t *testing.T) {
 }
 
 func TestConstrainedInputViewShowsTailOfLongMagnet(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMagnetInput
 	m.input.SetValue("magnet:?xt=urn:btih:" + strings.Repeat("a", 80) + "restofthestring")
 	m.input.CursorEnd()
@@ -248,7 +248,7 @@ func TestConstrainedInputViewShowsTailOfLongMagnet(t *testing.T) {
 }
 
 func TestInputPopupKeepsLongMagnetOnPromptLine(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMagnetInput
 	m.width = 100
 	m.height = 24

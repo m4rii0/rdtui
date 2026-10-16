@@ -249,7 +249,7 @@ func bulkFileSelectionSummaryLine(success, failed, skipped int) string {
 	return strings.Join(parts, ", ")
 }
 
-func bulkFileSelectionDetailsCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, plans []bulkFileSelectionPlan) tea.Cmd {
+func bulkFileSelectionDetailsCmd(ctx context.Context, runtime *app.Runtime, service TorrentService, plans []bulkFileSelectionPlan) tea.Cmd {
 	ordered := slices.Clone(plans)
 	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
 		details := make([]models.TorrentInfo, 0, len(ordered))
@@ -269,7 +269,7 @@ func bulkFileSelectionDetailsCmd(ctx context.Context, runtime *app.Runtime, serv
 	})
 }
 
-func bulkFileSelectionSubmitCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, submissions []bulkFileSelectionSubmission, outcomes []bulkFileSelectionOutcome) tea.Cmd {
+func bulkFileSelectionSubmitCmd(ctx context.Context, runtime *app.Runtime, service BatchService, submissions []bulkFileSelectionSubmission, outcomes []bulkFileSelectionOutcome) tea.Cmd {
 	ordered := slices.Clone(submissions)
 	for idx := range ordered {
 		ordered[idx].FileIDs = slices.Clone(ordered[idx].FileIDs)
@@ -280,7 +280,7 @@ func bulkFileSelectionSubmitCmd(ctx context.Context, runtime *app.Runtime, servi
 		for i, submission := range ordered {
 			selections[i] = app.FileSelection{TorrentID: submission.ID, FileIDs: submission.FileIDs}
 		}
-		batch := app.NewBatchService(batchServiceAPI{service}, service, nil).Select(ctx, selections)
+		batch := service.Select(ctx, selections)
 		items := make([]app.ItemOutcome, 0, len(baseOutcomes)+len(batch.Items))
 		names := make(map[string]string, len(baseOutcomes)+len(ordered))
 		for _, outcome := range baseOutcomes {

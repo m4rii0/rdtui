@@ -97,25 +97,18 @@ func (m *Model) refresh() tea.Cmd {
 	if m.list.InFlight || m.runtime.Context().Err() != nil {
 		return nil
 	}
-	return m.beginFeature(listFeature, func(ctx context.Context) tea.Cmd { return refreshCmd(ctx, m.runtime, m.service) })
+	return m.beginFeature(listFeature, func(ctx context.Context) tea.Cmd { return refreshCmd(ctx, m.runtime, m.torrentService) })
 }
 
 func (m *Model) resolveDownload(target models.DownloadTarget) tea.Cmd {
-	return m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd { return resolveDownloadCmd(ctx, m.runtime, m.service, target) })
-}
-
-func (m *Model) pollDevice() tea.Cmd {
-	if m.auth.InFlight || m.deviceCode == nil {
-		return nil
-	}
-	return m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd {
-		return pollDeviceCmd(ctx, m.runtime, m.service, *m.deviceCode)
+	return m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd {
+		return resolveDownloadCmd(ctx, m.runtime, m.prepareDownload, target)
 	})
 }
 
 func (m *Model) requestDetail(id string) tea.Cmd {
 	ctx, request := m.detailRequest.begin(m.runtime.Context())
-	return detailCmd(ctx, runtimeReader{m.runtime, m.service}, id, request)
+	return detailCmd(ctx, runtimeDetailReader{m.runtime, m.torrentService}, id, request)
 }
 
 func (m *Model) pollDownload() tea.Cmd {
@@ -126,7 +119,7 @@ func (m *Model) pollDownload() tea.Cmd {
 		return nil
 	}
 	ctx, request := m.downloadPoll.begin(m.runtime.Context())
-	cmd := downloadStatusCmd(ctx, runtimeReader{m.runtime, m.service}, downloadRequestID{request, m.downloadRef})
+	cmd := downloadStatusCmd(ctx, runtimeDownloadReader{m.runtime, m.downloads}, downloadRequestID{request, m.downloadRef})
 	queue := m.queueIdentity()
 	return func() tea.Msg {
 		msg := cmd().(managedDownloadStatusMsg)
@@ -160,16 +153,22 @@ type downloadReader interface {
 	Status(context.Context, app.DownloadRef) (app.DownloadSnapshot, error)
 }
 
-type runtimeReader struct {
+type runtimeDetailReader struct {
 	runtime *app.Runtime
-	service app.AppService
+	service detailReader
 }
 
-func (r runtimeReader) TorrentInfo(ctx context.Context, id string) (info models.TorrentInfo, err error) {
+func (r runtimeDetailReader) TorrentInfo(ctx context.Context, id string) (info models.TorrentInfo, err error) {
 	err = r.runtime.Do(ctx, func(ctx context.Context) error { info, err = r.service.TorrentInfo(ctx, id); return err })
 	return info, err
 }
-func (r runtimeReader) Status(ctx context.Context, ref app.DownloadRef) (snapshot app.DownloadSnapshot, err error) {
+
+type runtimeDownloadReader struct {
+	runtime *app.Runtime
+	service downloadReader
+}
+
+func (r runtimeDownloadReader) Status(ctx context.Context, ref app.DownloadRef) (snapshot app.DownloadSnapshot, err error) {
 	err = r.runtime.Do(ctx, func(ctx context.Context) error { snapshot, err = r.service.Status(ctx, ref); return err })
 	return snapshot, err
 }

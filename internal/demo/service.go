@@ -312,9 +312,23 @@ func (s *Service) Status(ctx context.Context, ref app.DownloadRef) (app.Download
 func (s *Service) CurrentDownload() (app.DownloadSnapshot, bool) { return s.downloads.Current() }
 
 func (s *Service) NewBulkQueue(runtime *app.Runtime) *app.BulkQueue {
-	return app.NewBulkQueue(app.QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: func(ctx context.Context, target models.DownloadTarget) (app.PreparedDownload, error) {
-		return app.PrepareDownload(ctx, target, s.Config().DefaultDownloadDir, s.ResolveDirectURL, func(string) (int64, bool, error) { return 0, false, nil })
-	}})
+	return app.NewBulkQueue(app.QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: s.PrepareDownload})
+}
+
+func (s *Service) PrepareDownload(ctx context.Context, target models.DownloadTarget) (app.PreparedDownload, error) {
+	return app.PrepareDownload(ctx, target, s.Config().DefaultDownloadDir, s.ResolveDirectURL, func(string) (int64, bool, error) { return 0, false, nil })
+}
+
+func (s *Service) NewBatches() *app.BatchService { return app.NewBatchService(batchAPI{s}, s, nil) }
+
+type batchAPI struct{ *Service }
+
+func (s batchAPI) UnrestrictLink(ctx context.Context, link string) (models.UnrestrictedLink, error) {
+	return s.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
+}
+func (s batchAPI) AddTorrentPath(ctx context.Context, path string) (models.AddTorrentResult, error) {
+	result := s.ImportTorrentFiles(ctx, []string{path})[0]
+	return models.AddTorrentResult{ID: result.TorrentID}, result.Err
 }
 
 // The demo uses the same coordinator/queue as production; only backend I/O is

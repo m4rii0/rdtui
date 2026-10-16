@@ -93,10 +93,30 @@ func (s *Service) CompleteDeviceFlow(ctx context.Context, code models.DeviceCode
 }
 
 func (s *Service) ListTorrents(ctx context.Context) ([]models.Torrent, error) {
+	return s.Torrents().ListTorrents(ctx)
+}
+
+// Temporary composition bridges while the facade still owns the live client.
+func (s *Service) Torrents() *TorrentService { return NewTorrentService(serviceTorrentAPI{s}) }
+
+type serviceTorrentAPI struct{ *Service }
+
+func (s serviceTorrentAPI) ListTorrents(ctx context.Context, limit int) ([]models.Torrent, error) {
 	if s.client == nil {
 		return nil, auth.ErrNoValidCredentials
 	}
-	return s.client.ListTorrents(ctx, 100)
+	return s.client.ListTorrents(ctx, limit)
+}
+
+func (s *Service) NewBatches() *BatchService { return NewBatchService(serviceBatchAPI{s}, s, nil) }
+
+type serviceBatchAPI struct{ *Service }
+
+func (s serviceBatchAPI) UnrestrictLink(ctx context.Context, link string) (models.UnrestrictedLink, error) {
+	return s.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
+}
+func (s serviceBatchAPI) AddTorrentPath(ctx context.Context, path string) (models.AddTorrentResult, error) {
+	return s.client.AddTorrentPath(ctx, path)
 }
 
 func (s *Service) TorrentInfo(ctx context.Context, id string) (models.TorrentInfo, error) {
@@ -211,21 +231,23 @@ func (s *Service) CurrentDownload() (DownloadSnapshot, bool) { return s.download
 // NewBulkQueue is temporary facade composition until all dependencies are wired
 // at the entry point. Singles and queues must share this coordinator.
 func (s *Service) NewBulkQueue(runtime *Runtime) *BulkQueue {
-	return NewBulkQueue(QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: func(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
-		return PrepareDownload(ctx, target, s.config.DefaultDownloadDir, s.ResolveDirectURL, func(path string) (int64, bool, error) {
-			info, err := os.Stat(path)
-			if errors.Is(err, os.ErrNotExist) {
-				return 0, false, nil
-			}
-			if err != nil {
-				return 0, false, err
-			}
-			if info.IsDir() {
-				return 0, false, fmt.Errorf("download target is directory: %s", path)
-			}
-			return info.Size(), true, nil
-		})
-	}})
+	return NewBulkQueue(QueueDependencies{Runtime: runtime, Downloads: s.downloads, Prepare: s.PrepareDownload})
+}
+
+func (s *Service) PrepareDownload(ctx context.Context, target models.DownloadTarget) (PreparedDownload, error) {
+	return PrepareDownload(ctx, target, s.config.DefaultDownloadDir, s.ResolveDirectURL, func(path string) (int64, bool, error) {
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		if info.IsDir() {
+			return 0, false, fmt.Errorf("download target is directory: %s", path)
+		}
+		return info.Size(), true, nil
+	})
 }
 
 func (s *Service) SavePrivateToken(token string) error {

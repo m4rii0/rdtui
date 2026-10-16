@@ -2,11 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -15,9 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/m4rii0/rdtui/internal/app"
-	"github.com/m4rii0/rdtui/internal/auth"
 	"github.com/m4rii0/rdtui/internal/debug"
-	"github.com/m4rii0/rdtui/internal/realdebrid"
 	"github.com/m4rii0/rdtui/internal/version"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
@@ -103,64 +96,28 @@ type targetPickerState struct {
 }
 
 type Model struct {
-	service         app.AppService
-	bulkQueue       BulkQueueService
-	queuePoll       asyncRequest
-	runtime         *app.Runtime
-	auth            asyncRequest
-	list            asyncRequest
-	setup           asyncRequest
-	detailRequest   asyncRequest
-	downloadPoll    asyncRequest
-	downloadRef     app.DownloadRef
-	queueGeneration uint64
-	schedule        func(time.Duration, tea.Msg) tea.Cmd
+	authModel
+	torrentsModel
+	downloadsModel
+	runtime  *app.Runtime
+	setup    asyncRequest
+	schedule func(time.Duration, tea.Msg) tea.Cmd
 
-	version     string
-	mode        mode
-	returnMode  mode
-	downloadDir string
-	width       int
-	height      int
-	loading     bool
-	status      string
-	errText     string
-	session     *models.AuthSession
-
-	torrents         []models.Torrent
-	filteredTorrents []models.Torrent
-	selectedIdx      int
-	detail           *models.TorrentInfo
-	pendingFocusID   string
-	sortColumn       int
-	sortAscending    bool
-	filterApplied    bool
-	filterMatches    map[string][]int
-
-	batchMode     bool
-	batchSelected map[string]bool
+	version    string
+	mode       mode
+	returnMode mode
+	width      int
+	height     int
+	loading    bool
+	status     string
+	errText    string
 
 	input       textinput.Model
 	inputPrompt string
 	inputAction inputAction
-	searchInput textinput.Model
 	spinner     spinner.Model
-	progress    progress.Model
-
-	deviceCode        *models.DeviceCode
-	browser           fileBrowserState
-	selector          selectFilesState
-	targets           targetPickerState
-	pendingDownload   *pendingDownloadState
-	showURL           string
-	download          *models.ManagedDownload
-	downloadTorrentID string
-	bulk              *bulkDownloadState
-	bulkSelect        *bulkFileSelectionState
-	deleteIDs         []string
-	helpVisible       bool
-	pendingAction     *pendingShortcutAction
-	flash             flashState
+	helpVisible bool
+	flash       flashState
 }
 
 type pendingDownloadState struct {
@@ -240,9 +197,7 @@ type managedDownloadMsg struct {
 }
 
 type resolvedDownloadMsg struct {
-	url      string
-	filename string
-	filesize int64
+	prepared app.PreparedDownload
 	err      error
 }
 
@@ -265,11 +220,7 @@ type devicePollTickMsg struct{ request requestID }
 
 type downloadTickMsg struct{ request downloadRequestID }
 
-func NewModel(service app.AppService, runtime *app.Runtime, queues ...BulkQueueService) Model {
-	var queue BulkQueueService
-	if len(queues) > 0 {
-		queue = queues[0]
-	}
+func NewModel(deps Dependencies) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.SetWidth(64)
@@ -285,25 +236,29 @@ func NewModel(service app.AppService, runtime *app.Runtime, queues ...BulkQueueS
 		progress.WithDefaultBlend(),
 	)
 	return Model{
-		service:       service,
-		bulkQueue:     queue,
-		runtime:       runtime,
-		version:       version.Current(),
-		mode:          modeStarting,
-		returnMode:    modeMain,
-		downloadDir:   modelDownloadDir(service),
-		input:         ti,
-		searchInput:   si,
-		spinner:       sp,
-		progress:      pb,
-		sortColumn:    colAdded,
-		sortAscending: false,
-		batchSelected: map[string]bool{},
+		authService:     deps.Auth,
+		torrentService:  deps.Torrents,
+		downloads:       deps.Downloads,
+		batches:         deps.Batches,
+		desktop:         deps.Desktop,
+		prepareDownload: deps.PrepareDownload,
+		bulkQueue:       deps.Bulk,
+		runtime:         deps.Runtime,
+		version:         version.Current(),
+		mode:            modeStarting,
+		returnMode:      modeMain,
+		input:           ti,
+		searchInput:     si,
+		spinner:         sp,
+		progress:        pb,
+		sortColumn:      colAdded,
+		sortAscending:   false,
+		batchSelected:   map[string]bool{},
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(bootstrapCmd(m.runtime.Context(), m.runtime, m.service), m.spinner.Tick)
+	return tea.Batch(bootstrapCmd(m.runtime.Context(), m.runtime, m.authService), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -319,24 +274,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg = result.msg
 	}
 	switch msg := msg.(type) {
-	case bulkStartedMsg:
-		return m.handleBulkStarted(msg)
-	case bulkSnapshotMsg:
-		return m.handleBulkSnapshot(msg)
-	case bulkTickMsg:
-		if m.bulk == nil || msg.queueID != m.bulk.QueueID || !m.queuePoll.current(msg.request) {
-			return m, nil
-		}
-		cmd := m.pollBulkQueue()
+	case bootstrapMsg, authMsg, deviceStartMsg, devicePollMsg, devicePollTickMsg:
+		cmd := m.authModel.update(&m, msg)
 		return m, cmd
-	case bulkDecisionMsg:
-		if m.bulk == nil || msg.decision.QueueID != m.bulk.QueueID || msg.decision.ItemIndex != m.bulk.Current {
-			return m, nil
-		}
-		if msg.err != nil && !errors.Is(msg.err, app.ErrStaleQueue) {
-			m.errText = msg.err.Error()
-		}
-		return m, nil
+	case tickMsg, torrentsMsg, detailMsg, browserReadDirMsg, addTorrentMsg,
+		importMsg, selectFilesMsg, bulkFileSelectionDetailsMsg, bulkFileSelectionResultMsg,
+		deleteMsg, batchResultMsg:
+		return m.torrentsModel.update(&m, msg)
+	case bulkStartedMsg, bulkSnapshotMsg, bulkTickMsg, bulkDecisionMsg,
+		downloadTickMsg, managedDownloadMsg, resolvedDownloadMsg,
+		managedDownloadStatusMsg, downloadPathMsg, progress.FrameMsg, bulkDetailsMsg, handoffMsg:
+		return m.downloadsModel.update(&m, msg)
 	case operationErrorMsg:
 		m.loading = false
 		m.errText = msg.err.Error()
@@ -347,514 +295,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		debug.Log("Update: WindowSize %dx%d", msg.Width, msg.Height)
 		return m, nil
 
-	case bootstrapMsg:
-		m.loading = false
-		if msg.err == nil {
-			m.session = msg.session
-			m.mode = modeMain
-			m.status = "Authenticated as " + msg.session.User.Username
-			m.errText = ""
-			cmd := m.refresh()
-			return m, cmd
-		}
-		if errors.Is(msg.err, auth.ErrNoValidCredentials) {
-			m.mode = modeAuthChoice
-			m.status = "Choose an authentication method"
-			m.errText = ""
-			return m, nil
-		}
-		m.mode = modeAuthChoice
-		m.errText = msg.err.Error()
-		return m, nil
-
-	case authMsg:
-		m.auth.invalidate()
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		m.session = msg.session
-		m.mode = modeMain
-		m.input.Blur()
-		m.input.Reset()
-		m.status = "Authenticated as " + msg.session.User.Username
-		m.errText = ""
-		cmd := m.refresh()
-		return m, cmd
-
-	case deviceStartMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			m.mode = modeAuthChoice
-			return m, nil
-		}
-		m.deviceCode = &msg.code
-		m.mode = modeDeviceAuth
-		m.status = "Finish device authorization in your browser"
-		m.errText = ""
-		return m, m.after(time.Duration(max(1, msg.code.Interval))*time.Second, devicePollTickMsg{requestID{m.auth.Generation}})
-
-	case devicePollMsg:
-		if msg.err == nil {
-			m.auth.invalidate()
-			m.session = msg.session
-			m.mode = modeMain
-			m.deviceCode = nil
-			m.status = "Authenticated as " + msg.session.User.Username
-			m.errText = ""
-			cmd := m.refresh()
-			return m, cmd
-		}
-		if errors.Is(msg.err, realdebrid.ErrAuthorizationPending) {
-			if m.deviceCode != nil && time.Since(m.deviceCode.RequestedAt) < time.Duration(m.deviceCode.ExpiresIn)*time.Second {
-				return m, m.after(time.Duration(max(1, m.deviceCode.Interval))*time.Second, devicePollTickMsg{requestID{m.auth.Generation}})
-			}
-			m.errText = "device code expired"
-			m.mode = modeAuthChoice
-			m.deviceCode = nil
-			return m, nil
-		}
-		m.errText = msg.err.Error()
-		m.mode = modeAuthChoice
-		m.deviceCode = nil
-		return m, nil
-
-	case tickMsg:
-		if !m.list.current(msg.request) || m.list.InFlight {
-			return m, nil
-		}
-		if m.mode == modeMain || m.mode == modeDetail || m.mode == modeSearch {
-			cmd := m.refresh()
-			return m, cmd
-		}
-		return m, m.nextListPoll()
-
-	case devicePollTickMsg:
-		if !m.auth.current(msg.request) || m.auth.InFlight {
-			return m, nil
-		}
-		if m.deviceCode != nil && m.mode == modeDeviceAuth {
-			cmd := m.pollDevice()
-			return m, cmd
-		}
-		return m, nil
-
-	case downloadTickMsg:
-		if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
-			return m, nil
-		}
-		if !m.downloadPoll.current(msg.request.Request) || msg.request.Ref != m.downloadRef {
-			return m, nil
-		}
-		if m.mode != modeDownload || m.download == nil || m.download.IsTerminal() {
-			return m, nil
-		}
-		cmd := m.pollDownload()
-		return m, cmd
-
 	case flashTimeoutMsg:
 		m.clearFlash()
-		return m, nil
-
-	case torrentsMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, m.nextListPoll()
-		}
-		selectedID := m.selectedTorrentID()
-		m.torrents = slices.Clone(msg.torrents)
-		sortTorrents(m.torrents, m.sortColumn, m.sortAscending)
-		if m.filterApplied || m.mode == modeSearch {
-			m.applyFilter()
-		}
-		vis := m.visibleTorrents()
-		if m.pendingFocusID != "" {
-			if idx, ok := torrentIndexForID(vis, m.pendingFocusID); ok {
-				m.selectedIdx = idx
-				m.pendingFocusID = ""
-			} else {
-				m.selectedIdx = selectedIndexForID(vis, selectedID)
-			}
-		} else {
-			m.selectedIdx = selectedIndexForID(vis, selectedID)
-		}
-		m.errText = ""
-		if len(m.torrents) == 0 {
-			m.detailRequest.invalidate()
-			m.detail = nil
-			m.status = "No torrents found"
-			return m, m.nextListPoll()
-		}
-		cmd := m.requestDetail(m.selectedTorrentID())
-		return m, tea.Batch(cmd, m.nextListPoll())
-
-	case detailMsg:
-		if !m.detailRequest.current(msg.request) || msg.id != m.selectedTorrentID() {
-			return m, nil
-		}
-		m.detailRequest.invalidate()
-		if msg.err != nil {
-			m.clearPendingDetailAction(msg.id)
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		if msg.id != m.selectedTorrentID() {
-			m.clearPendingDetailAction(msg.id)
-			return m, nil
-		}
-		m.detail = &msg.info
-		m.errText = ""
-		if action, ok := m.consumePendingDetailAction(msg.id); ok {
-			return m.handleShortcutAction(action)
-		}
-		return m, nil
-
-	case bulkDetailsMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		if m.bulk == nil {
-			return m, nil
-		}
-		m.bulk.applyDetails(msg.details)
-		if m.bulk.prepareFirstFilePrompt() {
-			m.mode = modeBulkFiles
-			m.errText = ""
-			return m, nil
-		}
-		m.bulk.buildQueueItems()
-		m.mode = modeBulkConfirm
-		m.errText = ""
-		return m, nil
-
-	case addTorrentMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		m.mode = modeMain
-		m.status = fmt.Sprintf("Added %s (%s)", msg.label, msg.result.ID)
-		m.pendingFocusID = msg.result.ID
-		m.errText = ""
-		cmd := m.refresh()
-		return m, cmd
-
-	case importMsg:
-		m.loading = false
-		m.mode = modeMain
-		success := 0
-		failed := 0
-		canceled := 0
-		failedNames := []string{}
-		focusID := ""
-		for _, result := range msg.result.Items {
-			if result.Kind == app.OutcomeSuccess {
-				success++
-				if focusID == "" {
-					focusID = result.TorrentCreatedID
-				}
-			} else if result.Kind == app.OutcomeCanceled {
-				canceled++
-			} else {
-				failed++
-				failedNames = append(failedNames, filepathBase(result.Source))
-			}
-		}
-		if focusID != "" {
-			m.pendingFocusID = focusID
-		}
-		if failed == 0 {
-			m.status = fmt.Sprintf("Imported %d torrent file(s)", success)
-			m.errText = ""
-		} else {
-			m.status = fmt.Sprintf("Imported %d torrent file(s), %d failed", success, failed)
-			m.errText = "Failed: " + strings.Join(failedNames, ", ")
-		}
-		if canceled > 0 {
-			m.status += fmt.Sprintf(", %d canceled", canceled)
-			m.errText = strings.TrimSpace(m.errText + "\n" + fmt.Sprint(msg.result.Err))
-			for _, item := range msg.result.Items {
-				if item.RemoteOutcomeUnknown {
-					m.errText += "\nRemote outcome unknown; not replayed"
-					break
-				}
-			}
-		}
-		cmd := m.refresh()
-		return m, cmd
-
-	case selectFilesMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		m.mode = m.returnMode
-		m.errText = ""
-		cmd := m.refresh()
-		return m, tea.Batch(cmd, m.setFlash(flashSuccess, "Updated torrent file selection"))
-
-	case bulkFileSelectionDetailsMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		if m.bulkSelect == nil {
-			return m, nil
-		}
-		m.bulkSelect.applyDetails(msg.details, msg.outcomes)
-		if m.bulkSelect.prepareFirstPrompt() {
-			m.mode = modeBulkSelectFiles
-			m.errText = ""
-			return m, nil
-		}
-		return m.startBulkFileSelectionSubmit()
-
-	case bulkFileSelectionResultMsg:
-		m.loading = false
-		m.mode = modeMain
-		m.bulkSelect = nil
-		m.clearBatchSelection()
-		m.batchMode = false
-		flashMsg := "Bulk file selection complete: " + bulkFileSelectionSummaryLine(msg.success, msg.failed, msg.skipped)
-		if msg.canceled > 0 {
-			flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
-		}
-		if msg.detail != "" {
-			m.errText = strings.TrimSpace(msg.detail)
-		} else {
-			m.errText = ""
-		}
-		level := flashSuccess
-		if msg.failed > 0 || msg.canceled > 0 {
-			level = flashWarn
-		}
-		cmd := m.refresh()
-		return m, tea.Batch(cmd, m.setFlash(level, flashMsg))
-
-	case deleteMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		if m.returnMode == modeDownload {
-			m.downloadTorrentID = ""
-		}
-		m.mode = modeMain
-		m.errText = ""
-		m.deleteIDs = nil
-		cmd := m.refresh()
-		return m, tea.Batch(cmd, m.setFlash(flashSuccess, "Deleted torrent"))
-
-	case batchResultMsg:
-		m.loading = false
-		switch msg.op {
-		case batchOpDelete:
-			m.mode = modeMain
-			var flashMsg string
-			if msg.failed > 0 || msg.canceled > 0 {
-				flashMsg = fmt.Sprintf("Deleted %d/%d torrent(s)", msg.success, msg.total)
-			} else {
-				flashMsg = fmt.Sprintf("Deleted %d torrent(s)", msg.success)
-			}
-			if msg.canceled > 0 {
-				flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
-			}
-			if msg.detail != "" {
-				m.errText = strings.TrimSpace(msg.detail)
-			} else {
-				m.errText = ""
-			}
-			m.deleteIDs = nil
-			m.clearBatchSelection()
-			m.batchMode = false
-			cmd := m.refresh()
-			return m, tea.Batch(cmd, m.setFlash(flashSuccess, flashMsg))
-		case batchOpCopy:
-			m.mode = modeMain
-			var parts []string
-			if msg.copied == msg.resolved && msg.copied > 0 {
-				parts = append(parts, fmt.Sprintf("Copied %d URL(s)", msg.copied))
-			} else {
-				parts = append(parts, fmt.Sprintf("Resolved %d URL(s), copied %d", msg.resolved, msg.copied))
-			}
-			if msg.success > 0 {
-				parts = append(parts, fmt.Sprintf("%d successful torrent(s)", msg.success))
-			}
-			if msg.partial > 0 {
-				parts = append(parts, fmt.Sprintf("%d partial torrent(s)", msg.partial))
-			}
-			if msg.skipped > 0 {
-				parts = append(parts, fmt.Sprintf("%d skipped torrent(s)", msg.skipped))
-			}
-			if msg.failed > 0 {
-				parts = append(parts, fmt.Sprintf("%d failed torrent(s)", msg.failed))
-			}
-			if msg.canceled > 0 {
-				parts = append(parts, fmt.Sprintf("%d canceled torrent(s)", msg.canceled))
-			}
-			flashMsg := strings.Join(parts, ", ")
-			if msg.detail != "" {
-				m.errText = strings.TrimSpace(msg.detail)
-			} else {
-				m.errText = ""
-			}
-			m.clearBatchSelection()
-			m.batchMode = false
-			level := flashSuccess
-			if msg.partial > 0 || msg.failed > 0 || msg.canceled > 0 || msg.copied < msg.resolved {
-				level = flashWarn
-			}
-			return m, m.setFlash(level, flashMsg)
-		case batchOpBulkCleanup:
-			m.mode = modeBulkDownload
-			var flashMsg string
-			if msg.failed > 0 || msg.canceled > 0 {
-				flashMsg = fmt.Sprintf("Deleted %d/%d source torrent(s)", msg.success, msg.total)
-			} else {
-				flashMsg = fmt.Sprintf("Deleted %d source torrent(s)", msg.success)
-			}
-			if msg.canceled > 0 {
-				flashMsg += fmt.Sprintf(", %d canceled", msg.canceled)
-			}
-			if msg.detail != "" {
-				m.errText = strings.TrimSpace(msg.detail)
-			} else {
-				m.errText = ""
-			}
-			cmd := m.refresh()
-			return m, tea.Batch(cmd, m.setFlash(flashSuccess, flashMsg))
-		}
-
-	case handoffMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		m.showURL = msg.result.URL
-		m.mode = modeShowURL
-		m.errText = ""
-		flashMsg := "Direct URL ready"
-		if msg.result.Copied {
-			flashMsg = "Direct URL copied to clipboard"
-		}
-		return m, m.setFlash(flashSuccess, flashMsg)
-
-	case managedDownloadMsg:
-		m.downloadPoll.invalidate()
-		m.downloadRef = msg.ref
-		m.loading = false
-		if msg.err != nil {
-			if errors.Is(msg.err, app.ErrQueueActive) && m.bulk != nil {
-				m.mode = modeBulkDownload
-				return m, nil
-			}
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		download := msg.result.Download
-		m.download = &download
-		m.mode = modeDownload
-		m.errText = ""
-		if msg.result.Reused {
-			m.status = "Reopened active download: " + download.Filename
-		} else {
-			m.status = "Started download: " + download.Filename
-		}
-		if download.IsTerminal() {
-			return m, nil
-		}
-		cmd := m.pollDownload()
-		return m, cmd
-
-	case resolvedDownloadMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		path := filepath.Join(m.downloadDir, msg.filename)
-		existingBytes, exists, err := existingFileSize(path)
-		if err != nil {
-			m.errText = err.Error()
-			return m, nil
-		}
-		if exists {
-			m.pendingDownload = &pendingDownloadState{
-				ResumeMode:    m.mode,
-				URL:           msg.url,
-				Filename:      msg.filename,
-				Path:          path,
-				RemoteBytes:   msg.filesize,
-				ExistingBytes: existingBytes,
-			}
-			m.mode = modeOverwrite
-			m.errText = ""
-			m.status = "Existing file found"
-			return m, nil
-		}
-		return m.startPendingDownload(msg.url, msg.filename)
-
-	case managedDownloadStatusMsg:
-		if m.bulk != nil && m.bulk.QueueID != 0 && !m.bulk.isFinished() {
-			return m, nil // The queue, not a single-download observation, owns progress.
-		}
-		if !m.downloadPoll.current(msg.request.Request) || msg.request.Ref != m.downloadRef || msg.queue != m.queueIdentity() {
-			return m, nil
-		}
-		m.downloadPoll.invalidate()
-		m.loading = false
-		if !msg.ok || (msg.err != nil && !msg.download.IsTerminal()) {
-			// Observation failures never replace the last valid snapshot.
-			if m.download != nil && !m.download.IsTerminal() {
-				return m, m.nextDownloadPoll()
-			}
-			return m, nil
-		}
-		download := msg.download
-		m.download = &download
-		if msg.err != nil {
-			m.status = "Managed download failed"
-			m.errText = ""
-			return m, nil
-		}
-		if download.IsComplete() {
-			m.status = "Download complete"
-			m.errText = ""
-			return m, nil
-		}
-		if download.IsError() {
-			m.status = "Managed download failed"
-			m.errText = ""
-			return m, nil
-		}
-		return m, m.nextDownloadPoll()
-
-	case downloadPathMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errText = msg.err.Error()
-			return m, nil
-		}
-		m.errText = ""
-		if msg.action == "open" {
-			m.status = "Opened downloaded file"
-		} else {
-			m.status = "Opened download directory"
-		}
-		return m, nil
-
-	case browserReadDirMsg:
-		m.browser.handleReadDir(msg)
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -871,10 +313,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
-	case progress.FrameMsg:
-		var cmd tea.Cmd
-		m.progress, cmd = m.progress.Update(msg)
-		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -917,7 +355,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "2", "d":
 			m.loading = true
 			m.errText = ""
-			cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return startDeviceCmd(ctx, m.runtime, m.service) })
+			cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return startDeviceCmd(ctx, m.runtime, m.authService) })
 			return m, cmd
 		}
 
@@ -941,12 +379,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			switch m.inputAction {
 			case inputToken:
-				cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return authTokenCmd(ctx, m.runtime, m.service, value) })
+				cmd := m.beginFeature(authFeature, func(ctx context.Context) tea.Cmd { return authTokenCmd(ctx, m.runtime, m.authService, value) })
 				return m, cmd
 			case inputMagnet:
-				return m, addMagnetCmd(m.runtime.Context(), m.runtime, m.service, value)
+				return m, addMagnetCmd(m.runtime.Context(), m.runtime, m.torrentService, value)
 			case inputURL:
-				return m, addURLCmd(m.runtime.Context(), m.runtime, m.service, value)
+				return m, addURLCmd(m.runtime.Context(), m.runtime, m.torrentService, value)
 			}
 		}
 		var cmd tea.Cmd
@@ -1231,7 +669,7 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		m.loading = true
-		return m, importCmd(m.runtime.Context(), m.runtime, m.service, valid)
+		return m, importCmd(m.runtime.Context(), m.runtime, m.batches, valid)
 	case actionBrowserEditConfirm:
 		cmd, _, _, errMsg := m.browser.confirmPath()
 		if errMsg != "" {
@@ -1288,13 +726,13 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	case actionOpenFile:
 		if m.canOpenManagedDownloadFile() {
 			m.loading = true
-			return m, openDownloadCmd(m.runtime.Context(), m.runtime, m.service, m.download.FilePath)
+			return m, openDownloadCmd(m.runtime.Context(), m.runtime, m.desktop, m.download.FilePath)
 		}
 		return m, nil
 	case actionRevealFile:
 		if m.canOpenManagedDownloadFile() {
 			m.loading = true
-			return m, revealDownloadCmd(m.runtime.Context(), m.runtime, m.service, m.download.FilePath)
+			return m, revealDownloadCmd(m.runtime.Context(), m.runtime, m.desktop, m.download.FilePath)
 		}
 		return m, nil
 	}
@@ -1396,7 +834,7 @@ func (m Model) handleCopyAction() (tea.Model, tea.Cmd) {
 		ids := m.batchSelectedIDs()
 		m.loading = true
 		m.returnMode = modeMain
-		return m, batchOpCmd(m.runtime.Context(), m.runtime, m.service, batchOpCopy, ids, m.torrents)
+		return m, batchOpCmd(m.runtime.Context(), m.runtime, m.batches, batchOpCopy, ids, m.torrents)
 	}
 	if m.mode == modeMain {
 		if !m.canReadyActionsFromSelection() {
@@ -1555,7 +993,7 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = true
-		return m, selectFilesCmd(m.runtime.Context(), m.runtime, m.service, m.detail.ID, ids)
+		return m, selectFilesCmd(m.runtime.Context(), m.runtime, m.torrentService, m.detail.ID, ids)
 	case modeChooseTarget:
 		if len(m.targets.Items) == 0 {
 			return m, nil
@@ -1569,7 +1007,7 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd {
-			return handoffCmd(ctx, m.runtime, m.service, m.targets.Items[m.targets.Cursor])
+			return handoffCmd(ctx, m.runtime, m.batches, m.targets.Items[m.targets.Cursor])
 		})
 		return m, cmd
 	case modeBulkOrder:
@@ -1578,7 +1016,9 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 		}
 		m.loading = true
 		m.errText = ""
-		cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd { return bulkDetailsCmd(ctx, m.runtime, m.service, m.bulk.Plans) })
+		cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd {
+			return bulkDetailsCmd(ctx, m.runtime, m.torrentService, m.bulk.Plans)
+		})
 		return m, cmd
 	case modeBulkFiles:
 		if m.bulk == nil {
@@ -1637,20 +1077,20 @@ func (m Model) handlePopupConfirm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = true
-		return m, batchOpCmd(m.runtime.Context(), m.runtime, m.service, batchOpBulkCleanup, ids, m.torrents)
+		return m, batchOpCmd(m.runtime.Context(), m.runtime, m.batches, batchOpBulkCleanup, ids, m.torrents)
 	case modeDelete:
 		if len(m.deleteIDs) > 1 {
 			m.loading = true
 			ids := make([]string, len(m.deleteIDs))
 			copy(ids, m.deleteIDs)
-			return m, batchOpCmd(m.runtime.Context(), m.runtime, m.service, batchOpDelete, ids, m.torrents)
+			return m, batchOpCmd(m.runtime.Context(), m.runtime, m.batches, batchOpDelete, ids, m.torrents)
 		}
 		if len(m.deleteIDs) == 0 {
 			m.mode = m.returnMode
 			return m, nil
 		}
 		m.loading = true
-		return m, deleteCmd(m.runtime.Context(), m.runtime, m.service, m.deleteIDs[0])
+		return m, deleteCmd(m.runtime.Context(), m.runtime, m.torrentService, m.deleteIDs[0])
 	case modeOverwrite:
 		if m.pendingDownload == nil {
 			m.mode = m.returnMode
@@ -1695,7 +1135,7 @@ func (m *Model) beginHandoff(action handoffAction) (tea.Model, tea.Cmd) {
 			return *m, cmd
 		}
 		m.loading = true
-		cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd { return handoffCmd(ctx, m.runtime, m.service, targets[0]) })
+		cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd { return handoffCmd(ctx, m.runtime, m.batches, targets[0]) })
 		return *m, cmd
 	}
 	m.targets = targetPickerState{Items: targets, Action: action}
@@ -1741,7 +1181,7 @@ func (m Model) beginBulkFileSelectionSetup() (tea.Model, tea.Cmd) {
 	m.errText = ""
 	m.status = "Loading bulk file selection details"
 	cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd {
-		return bulkFileSelectionDetailsCmd(ctx, m.runtime, m.service, m.bulkSelect.Plans)
+		return bulkFileSelectionDetailsCmd(ctx, m.runtime, m.torrentService, m.bulkSelect.Plans)
 	})
 	return m, cmd
 }
@@ -1769,7 +1209,7 @@ func (m Model) startBulkFileSelectionSubmit() (tea.Model, tea.Cmd) {
 	m.loading = true
 	m.status = "Submitting bulk file selections"
 	m.errText = ""
-	return m, bulkFileSelectionSubmitCmd(m.runtime.Context(), m.runtime, m.service, submissions, m.bulkSelect.Outcomes)
+	return m, bulkFileSelectionSubmitCmd(m.runtime.Context(), m.runtime, m.batches, submissions, m.bulkSelect.Outcomes)
 }
 
 func (m Model) View() tea.View {
@@ -1808,9 +1248,7 @@ func (m *Model) selectAllTorrents() {
 }
 
 func (m *Model) clearBatchSelection() {
-	for k := range m.batchSelected {
-		delete(m.batchSelected, k)
-	}
+	clear(m.batchSelected)
 }
 
 func (m *Model) batchSelectedIDs() []string {
@@ -1894,241 +1332,6 @@ func operationCmd(ctx context.Context, runtime *app.Runtime, fn func(context.Con
 	}
 }
 
-func bootstrapCmd(ctx context.Context, runtime *app.Runtime, service app.AppService) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		session, err := service.Bootstrap(ctx)
-		return bootstrapMsg{session: session, err: err}
-	})
-}
-
-func authTokenCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, token string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		session, err := service.AuthenticateWithToken(ctx, token, true)
-		return authMsg{session: session, err: err}
-	})
-}
-
-func startDeviceCmd(ctx context.Context, runtime *app.Runtime, service app.AppService) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		code, err := service.StartDeviceFlow(ctx)
-		return deviceStartMsg{code: code, err: err}
-	})
-}
-
-func pollDeviceCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, code models.DeviceCode) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		session, err := service.CompleteDeviceFlow(ctx, code)
-		return devicePollMsg{session: session, err: err}
-	})
-}
-
-func refreshCmd(ctx context.Context, runtime *app.Runtime, service app.AppService) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		torrents, err := service.ListTorrents(ctx)
-		return torrentsMsg{torrents: torrents, err: err}
-	})
-}
-
-func bulkDetailsCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, plans []bulkTorrentPlan) tea.Cmd {
-	if len(plans) == 0 {
-		return nil
-	}
-	ordered := slices.Clone(plans)
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		details := make([]models.TorrentInfo, 0, len(ordered))
-		for _, plan := range ordered {
-			if err := ctx.Err(); err != nil {
-				return bulkDetailsMsg{err: err}
-			}
-			info, err := service.TorrentInfo(ctx, plan.ID)
-			if err != nil {
-				return bulkDetailsMsg{err: fmt.Errorf("load %s details: %w", plan.Name, err)}
-			}
-			details = append(details, info)
-		}
-		return bulkDetailsMsg{details: details}
-	})
-}
-
-func addMagnetCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, magnet string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		result, err := service.AddMagnet(ctx, magnet)
-		return addTorrentMsg{result: result, err: err, label: "magnet"}
-	})
-}
-
-func addURLCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, remoteURL string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		result, err := service.AddTorrentURL(ctx, remoteURL)
-		return addTorrentMsg{result: result, err: err, label: "remote torrent URL"}
-	})
-}
-
-func importCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, paths []string) tea.Cmd {
-	paths = slices.Clone(paths)
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return importMsg{result: app.NewBatchService(batchServiceAPI{service}, service, nil).Import(ctx, paths)}
-	})
-}
-
-func selectFilesCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, torrentID string, ids []int) tea.Cmd {
-	ids = slices.Clone(ids)
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return selectFilesMsg{err: service.SelectFiles(ctx, torrentID, ids)}
-	})
-}
-
-func deleteCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, torrentID string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return deleteMsg{err: service.DeleteTorrent(ctx, torrentID)}
-	})
-}
-
-// Adapt the current facade without expanding every TUI dependency with raw API
-// methods. Local imports remain compatible with demo and existing consumers.
-type batchServiceAPI struct{ app.AppService }
-
-func (s batchServiceAPI) UnrestrictLink(ctx context.Context, link string) (models.UnrestrictedLink, error) {
-	return s.ResolveDirectURL(ctx, models.DownloadTarget{Link: link})
-}
-
-func (s batchServiceAPI) AddTorrentPath(ctx context.Context, path string) (models.AddTorrentResult, error) {
-	results := s.ImportTorrentFiles(ctx, []string{path})
-	if len(results) != 1 {
-		return models.AddTorrentResult{}, errors.New("import returned no result")
-	}
-	return models.AddTorrentResult{ID: results[0].TorrentID}, results[0].Err
-}
-
-func batchOpCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, op batchOp, ids []string, torrents []models.Torrent) tea.Cmd {
-	ids = slices.Clone(ids)
-	torrents = slices.Clone(torrents)
-	for idx := range torrents {
-		torrents[idx].Links = slices.Clone(torrents[idx].Links)
-	}
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		switch op {
-		case batchOpDelete:
-			return executeBatchDelete(ctx, service, ids)
-		case batchOpBulkCleanup:
-			result := executeBatchDelete(ctx, service, ids)
-			result.op = batchOpBulkCleanup
-			return result
-		case batchOpCopy:
-			return executeBatchCopy(ctx, service, ids, torrents)
-		}
-		return batchResultMsg{op: op, err: fmt.Errorf("unknown operation: %s", op)}
-	})
-}
-
-func executeBatchDelete(ctx context.Context, service app.AppService, ids []string) batchResultMsg {
-	batch := app.NewBatchService(batchServiceAPI{service}, service, nil).Delete(ctx, ids)
-	return batchMessage(batchOpDelete, batch)
-}
-
-func executeBatchCopy(ctx context.Context, service app.AppService, ids []string, torrents []models.Torrent) batchResultMsg {
-	byID := make(map[string]models.Torrent, len(torrents))
-	for _, torrent := range torrents {
-		byID[torrent.ID] = torrent
-	}
-	var requests []app.LinkRequest
-	for _, id := range ids {
-		torrent := byID[id]
-		if torrent.Status != "downloaded" || len(torrent.Links) == 0 {
-			requests = append(requests, app.LinkRequest{TorrentID: id})
-			continue
-		}
-		for index, link := range torrent.Links {
-			requests = append(requests, app.LinkRequest{TorrentID: id, Target: models.DownloadTarget{Index: index, Link: link}, Eligible: true})
-		}
-	}
-	batch := app.NewBatchService(batchServiceAPI{service}, service, nil).CopyLinks(ctx, requests)
-	result := batchMessage(batchOpCopy, batch.BatchResult)
-	summary := app.SummarizeTorrents(batch.Items)
-	result.total = summary.Success + summary.Partial + summary.Failed + summary.Skipped + summary.Canceled
-	result.success, result.partial, result.failed, result.skipped, result.canceled = summary.Success, summary.Partial, summary.Failed, summary.Skipped, summary.Canceled
-	result.resolved, result.copied = len(batch.ResolvedURLs), batch.CopiedURLs
-	if batch.ClipboardErr != nil {
-		result.detail += batch.ClipboardErr.Error() + "\n"
-	}
-	return result
-}
-
-func batchMessage(op batchOp, batch app.BatchResult) batchResultMsg {
-	result := batchResultMsg{op: op, total: len(batch.Items), items: batch.Items, err: batch.Err}
-	for _, item := range batch.Items {
-		switch item.Kind {
-		case app.OutcomeSuccess:
-			result.success++
-		case app.OutcomeFailed:
-			result.failed++
-		case app.OutcomeSkipped:
-			result.skipped++
-		case app.OutcomeCanceled:
-			result.canceled++
-		}
-		if item.Err != nil {
-			result.detail += fmt.Sprintf("%s: %v\n", item.TorrentID, item.Err)
-		}
-		if item.RemoteOutcomeUnknown {
-			result.detail += "Remote outcome unknown; not replayed\n"
-		}
-	}
-	return result
-}
-
-func handoffCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, target models.DownloadTarget) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		unrestricted, err := service.ResolveDirectURL(ctx, target)
-		if err != nil {
-			return handoffMsg{err: err}
-		}
-		url := unrestricted.Download
-		if url == "" {
-			url = unrestricted.Link
-		}
-		copied, err := service.CopyURL(url)
-		return handoffMsg{result: models.HandoffResult{URL: url, Copied: copied}, err: err}
-	})
-}
-
-func resolveDownloadCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, target models.DownloadTarget) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		unrestricted, err := service.ResolveDirectURL(ctx, target)
-		if err != nil {
-			return resolvedDownloadMsg{err: err}
-		}
-		url := unrestricted.Download
-		if url == "" {
-			url = unrestricted.Link
-		}
-		filename := unrestricted.Filename
-		if filename == "" {
-			filename = target.Label
-		}
-		return resolvedDownloadMsg{url: url, filename: filename, filesize: unrestricted.Filesize}
-	})
-}
-
-func startManagedDownloadCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, url string, filename string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		result, err := service.Start(ctx, url, filename)
-		return managedDownloadMsg{ref: result.Snapshot.Ref, result: models.ManagedDownloadStart{Download: result.Snapshot.Download, Reused: result.Reused}, err: err}
-	})
-}
-
-func openDownloadCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, path string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return downloadPathMsg{action: "open", err: service.OpenFile(path)}
-	})
-}
-
-func revealDownloadCmd(ctx context.Context, runtime *app.Runtime, service app.AppService, path string) tea.Cmd {
-	return operationCmd(ctx, runtime, func(ctx context.Context) tea.Msg {
-		return downloadPathMsg{action: "reveal", err: service.RevealInDirectory(path)}
-	})
-}
-
 func selectedIndexForID(torrents []models.Torrent, id string) int {
 	if len(torrents) == 0 {
 		return 0
@@ -2156,46 +1359,6 @@ func fallbackModeForInput(action inputAction) mode {
 		return modeAuthChoice
 	}
 	return modeMain
-}
-
-func modelDownloadDir(service app.AppService) string {
-	if service != nil {
-		if dir := service.Config().DefaultDownloadDir; dir != "" {
-			return dir
-		}
-	}
-	return filepath.Join(userHomeDir(), "Downloads")
-}
-
-func (m *Model) startPendingDownload(url string, filename string) (tea.Model, tea.Cmd) {
-	m.pendingDownload = nil
-	m.loading = true
-	cmd := m.beginFeature(setupFeature, func(ctx context.Context) tea.Cmd {
-		return startManagedDownloadCmd(ctx, m.runtime, m.service, url, filename)
-	})
-	return *m, cmd
-}
-
-func existingFileSize(path string) (int64, bool, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, false, nil
-		}
-		return 0, false, err
-	}
-	if info.IsDir() {
-		return 0, false, fmt.Errorf("download target is directory: %s", path)
-	}
-	return info.Size(), true, nil
-}
-
-func userHomeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "."
-	}
-	return home
 }
 
 func filepathBase(path string) string {

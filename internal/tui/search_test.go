@@ -94,7 +94,7 @@ func TestFilterTorrentsFuzzy(t *testing.T) {
 }
 
 func TestSlashEntersSearchMode(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	m.torrents = []models.Torrent{
 		{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
@@ -113,7 +113,7 @@ func TestSlashEntersSearchMode(t *testing.T) {
 }
 
 func TestSlashPreservesQueryWhenFilterApplied(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	m.torrents = []models.Torrent{
 		{ID: "a", Filename: "test", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
@@ -407,7 +407,7 @@ func TestApplyFilterPopulatesMatchMap(t *testing.T) {
 		},
 		selectedIdx: 0,
 	}
-	m.searchInput = NewModel(nil, newTestRuntime(t)).searchInput
+	m.searchInput = NewModel(Dependencies{Runtime: newTestRuntime(t)}).searchInput
 	m.searchInput.SetValue("alpha")
 	m.applyFilter()
 
@@ -432,7 +432,7 @@ func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
 		},
 		selectedIdx: 0,
 	}
-	m.searchInput = NewModel(nil, newTestRuntime(t)).searchInput
+	m.searchInput = NewModel(Dependencies{Runtime: newTestRuntime(t)}).searchInput
 	m.searchInput.Reset()
 	m.applyFilter()
 
@@ -442,7 +442,7 @@ func TestApplyFilterClearsMatchMapOnEmptyQuery(t *testing.T) {
 }
 
 func TestSearchTypingJKDoesNotNavigate(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
 	m.selectedIdx = 0
@@ -463,7 +463,7 @@ func TestSearchTypingJKDoesNotNavigate(t *testing.T) {
 }
 
 func TestSearchQuestionMarkStaysInInput(t *testing.T) {
-	m := NewModel(nil, newTestRuntime(t))
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	m.torrents = []models.Torrent{{ID: "a", Filename: "alpha", Added: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}}
 
