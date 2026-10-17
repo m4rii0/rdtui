@@ -24,7 +24,7 @@ func TestActivityStrip(t *testing.T) {
 	for _, mode := range []mode{modeMain, modeSearch, modeDetail, modeDownload, modeBulkDownload} {
 		m.mode = mode
 		v := ansi.Strip(renderView(m))
-		if !strings.Contains(v, "63.0%") || strings.Contains(v, "SECRET") || strings.Contains(v, "F6") {
+		if !strings.Contains(v, "63.0%") || strings.Contains(v, "SECRET") {
 			t.Fatalf("activity missing/leaked in %s: %s", mode, v)
 		}
 		if mode == modeSearch {
@@ -100,7 +100,7 @@ func TestActivityFooterPriority(t *testing.T) {
 	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	footer := ansi.Strip(activityFooter(m, 36))
-	if strings.Count(footer, "a activity") != 1 || strings.Contains(footer, "F6") || !strings.Contains(footer, "? help") || !strings.Contains(footer, "move") {
+	if strings.Count(footer, "a activity") != 1 || !strings.Contains(footer, "? help") || !strings.Contains(footer, "move") {
 		t.Fatalf("essential hints crowded out: %q", footer)
 	}
 }
@@ -129,16 +129,12 @@ func TestActivityShortcutPreservesTextInput(t *testing.T) {
 	}
 }
 
-func TestActivityShortcutDropsF6AndRespectsHelp(t *testing.T) {
+func TestActivityShortcutRespectsHelp(t *testing.T) {
 	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	m.download = &models.ManagedDownload{Status: models.ManagedDownloadStatusActive}
-	m, cmd := uxPress(m, tea.KeyPressMsg{Code: tea.KeyF6})
-	if m.mode != modeMain || cmd != nil {
-		t.Fatal("obsolete F6 binding still active")
-	}
 	m.helpVisible = true
-	m, cmd = uxRune(m, 'a')
+	m, cmd := uxRune(m, 'a')
 	if m.mode != modeMain || !m.helpVisible || cmd != nil {
 		t.Fatal("activity escaped help overlay")
 	}
