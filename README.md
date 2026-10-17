@@ -4,8 +4,7 @@
 
 [Record and publish the demo video](#record-and-publish-the-showcase).
 
-<!-- Replace this comment with the GitHub-hosted video URL after manual upload.
-     Do not add the generated MP4 to Git. See the showcase instructions below. -->
+https://github.com/user-attachments/assets/f93353ef-4d17-4178-96f9-2485b558bdc0
 
 ## Status
 
