@@ -9,7 +9,7 @@ VHS_BROWSER_LIB_DIR ?= $(HOME)/.cache/rdtui-vhs-libs/usr/lib/x86_64-linux-gnu
 VERSION ?= $(shell latest_tag=$$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1); short_hash=$$(git rev-parse --short HEAD 2>/dev/null); dirty=$$(test -z "$$(git status --porcelain 2>/dev/null)" || printf '+dirty'); if [ -n "$$latest_tag" ] && [ -n "$$short_hash" ]; then printf '%s-%s%s' "$$latest_tag" "$$short_hash" "$$dirty"; elif [ -n "$$short_hash" ]; then printf 'v0.0.0-%s%s' "$$short_hash" "$$dirty"; else printf 'dev'; fi)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
-.PHONY: help build run run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-gif
+.PHONY: help build run demo run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-gif
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 	  '  make build      Build the binary into bin/' \
 	  '  make build-all  Build binaries for darwin/linux/windows (amd64+arm64)' \
 	  '  make run        Run the TUI directly with go run' \
+	  '  make demo       Run the TUI with simulated data (RDTUI_DEMO=1)' \
 	  '  make run-debug  Run the TUI with debug logging (RDTUI_DEBUG=1)' \
 	  '  make test       Run the Go test suite' \
 	  '  make test-race  Run the full Go test suite with the race detector' \
@@ -47,6 +48,9 @@ build-all:
 
 run:
 	$(GO) run $(LDFLAGS) $(CMD_DIR)
+
+demo:
+	RDTUI_DEMO=1 $(MAKE) run
 
 run-debug:
 	RDTUI_DEBUG=1 $(GO) run $(LDFLAGS) $(CMD_DIR)
