@@ -56,23 +56,33 @@ Sleep 1s
 Type "d"
 Wait+Screen /Managed Download/
 Sleep 5s
+# Return from the download to details, then the filtered torrent list.
 Escape
+Wait+Screen /Torrent Details/
 Sleep 500ms
 Escape
+Wait+Screen /Torrents/
 Sleep 500ms
-Type "q"
+# Clear the filter without quitting, then start at the first torrent.
+Escape
+Wait+Screen /Torrents\s+\[[0-9]{2,}\]/
+Up 25
 Sleep 500ms
 
 # Select three torrents in batch mode and delete them.
 Type "b"
+Wait+Screen /BATCH · 0 selected/
 Sleep 500ms
 Space
+Wait+Screen /BATCH · 1 selected/
 Sleep 250ms
 Down
 Space
+Wait+Screen /BATCH · 2 selected/
 Sleep 250ms
 Down
 Space
+Wait+Screen /BATCH · 3 selected/
 Sleep 1s
 Type "x"
 Wait+Screen /Delete Torrents/
