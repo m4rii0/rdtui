@@ -58,7 +58,7 @@ func renderAuthChoice(m Model) string {
 	if m.status != "" {
 		lines = append(lines, "", infoStyle.Render("  ▸ "+m.status))
 	}
-	return strings.Join(lines, "\n")
+	return authLayout(m, lines)
 }
 
 func renderInput(m Model) string {
@@ -75,7 +75,7 @@ func renderInput(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}
-	return strings.Join(lines, "\n")
+	return authLayout(m, lines)
 }
 
 func renderDeviceAuth(m Model) string {
@@ -106,6 +106,21 @@ func renderDeviceAuth(m Model) string {
 	}
 	if m.loading {
 		lines = append(lines, "", infoStyle.Render("  ⠋ Waiting for authorization..."))
+	}
+	return authLayout(m, lines)
+}
+
+// Keep authentication actionable when the banner and spacing exceed the screen.
+func authLayout(m Model, lines []string) string {
+	available := m.height - appStyle.GetVerticalFrameSize()
+	if m.height > 0 && lipgloss.Height(strings.Join(lines, "\n")) > available {
+		compact := make([]string, 0, len(lines)-1)
+		for _, line := range lines[1:] {
+			if strings.TrimSpace(line) != "" {
+				compact = append(compact, strings.TrimPrefix(line, "  "))
+			}
+		}
+		lines = compact
 	}
 	return strings.Join(lines, "\n")
 }
@@ -304,7 +319,13 @@ func renderSearchBar(m Model) string {
 	if m.filterApplied && m.mode != modeSearch {
 		prefix = warnStyle.Render("▸ ") + mutedStyle.Render("filter: ")
 	}
-	return prefix + m.searchInput.View() + "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
+	suffix := "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
+	if (m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12) {
+		// Resize the viewport before rendering so it scrolls with the cursor.
+		m.searchInput.SetWidth(max(1, m.width-lipgloss.Width(prefix+suffix+m.searchInput.Prompt)-1))
+		m.searchInput.SetCursor(m.searchInput.Position())
+	}
+	return prefix + m.searchInput.View() + suffix
 }
 
 type shortcutHint struct {

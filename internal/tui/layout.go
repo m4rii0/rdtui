@@ -43,6 +43,9 @@ func boundView(view string, width, height int) string {
 
 func renderCompactMain(m Model) string {
 	lines := []string{}
+	if m.mode == modeSearch || m.filterApplied {
+		lines = append(lines, renderSearchBar(m))
+	}
 	switch {
 	case m.mode == modeDetail && m.detail != nil:
 		lines = append(lines, statusLabelForSearch(m.detail.Status)+" "+m.detail.Filename)

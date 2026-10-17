@@ -44,6 +44,18 @@ type downloadsModel struct {
 }
 
 func (d *downloadsModel) update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Preparation and start results update the screen beneath quit, never its
+	// input owner. Canceling quit reveals any pending overwrite separately.
+	if m.mode == modeQuitConfirm {
+		switch msg.(type) {
+		case resolvedDownloadMsg, managedDownloadMsg:
+			m.mode = m.quitReturnMode
+			updated, cmd := d.update(m, msg)
+			result := updated.(Model)
+			result.quitReturnMode, result.mode = result.mode, modeQuitConfirm
+			return result, cmd
+		}
+	}
 	switch msg := msg.(type) {
 	case bulkDetailsMsg:
 		m.loading = false

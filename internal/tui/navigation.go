@@ -92,6 +92,9 @@ func (m Model) navigationAction(action shortcutAction) (tea.Model, tea.Cmd) {
 		m.runtime.Stop()
 		return m, tea.Quit
 	}
+	if (action == actionSortApply || action == actionSortCancel) && m.pendingDownload != nil {
+		m.mode = modeOverwrite
+	}
 	return m, nil
 }
 

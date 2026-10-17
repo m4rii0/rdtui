@@ -81,7 +81,8 @@ func (m *Model) feature(feature asyncFeature) *asyncRequest {
 }
 
 func (m *Model) queueIdentity() queueIdentity {
-	if m.bulk != nil {
+	// Drafts do not own transfers and must not invalidate standalone observation.
+	if m.bulk != nil && m.bulk.QueueID != 0 {
 		return queueIdentity{m.queueGeneration, m.bulk.Current}
 	}
 	return queueIdentity{}

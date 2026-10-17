@@ -167,12 +167,16 @@ func (m Model) applyBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 	}
 	if pending := m.pendingDownload; pending != nil && pending.Queue != nil && pending.Queue.QueueID == msg.queueID &&
 		(pending.Queue.ItemIndex != msg.snapshot.CurrentIndex || !msg.snapshot.AwaitingOverwrite) {
-		m.mode = pending.ResumeMode
+		if m.mode == modeOverwrite {
+			m.mode = pending.ResumeMode
+		}
 		m.pendingDownload = nil
 	}
 	if msg.snapshot.Finished {
 		if m.pendingDownload != nil && m.pendingDownload.Queue != nil && m.pendingDownload.Queue.QueueID == msg.queueID {
-			m.mode = m.pendingDownload.ResumeMode
+			if m.mode == modeOverwrite {
+				m.mode = m.pendingDownload.ResumeMode
+			}
 			m.pendingDownload = nil
 		}
 		success, failed, skipped := m.bulk.resultCounts()
@@ -189,9 +193,15 @@ func (m Model) applyBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 		decision := app.QueueDecision{QueueID: msg.queueID, ItemIndex: msg.snapshot.CurrentIndex}
 		if m.bulk.DecidedItem == nil || m.bulk.DecidedItem.QueueID != decision.QueueID || m.bulk.DecidedItem.ItemIndex != decision.ItemIndex {
 			if m.pendingDownload == nil || m.pendingDownload.Queue == nil || *m.pendingDownload.Queue != decision {
-				m.pendingDownload = &pendingDownloadState{Queue: new(decision), ResumeMode: m.mode, Path: msg.snapshot.ExistingPath,
+				resume := m.mode
+				if resume == modeSort {
+					resume = modeMain
+				}
+				m.pendingDownload = &pendingDownloadState{Queue: new(decision), ResumeMode: resume, Path: msg.snapshot.ExistingPath,
 					Filename: filepath.Base(msg.snapshot.ExistingPath), RemoteBytes: msg.snapshot.RemoteBytes, ExistingBytes: msg.snapshot.ExistingBytes}
-				m.mode = modeOverwrite
+				if m.mode != modeSort {
+					m.mode = modeOverwrite
+				}
 				m.status = "Existing file found"
 			}
 		}

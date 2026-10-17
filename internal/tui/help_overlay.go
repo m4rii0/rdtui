@@ -17,7 +17,7 @@ var helpGroupOrder = []shortcutGroup{
 }
 
 func helpContent(m Model) []string {
-	innerW := helpWidth(m) - 4
+	innerW := max(1, helpWidth(m)-4-popupBoxStyle.GetHorizontalFrameSize())
 	defs := sortShortcutDefs(m.helpContextShortcutDefs())
 	grouped := make(map[shortcutGroup][]shortcutDef)
 	for _, def := range defs {
@@ -63,6 +63,10 @@ func helpContent(m Model) []string {
 	if m.errText != "" {
 		lines = append(lines, "", headStyle.Render("Current error"))
 		lines = append(lines, strings.Split(ansi.Hardwrap(m.errText, max(1, innerW), false), "\n")...)
+	}
+	if m.mode == modeDownload && m.download != nil && m.download.ErrorMessage != "" && m.download.ErrorMessage != m.errText {
+		lines = append(lines, "", headStyle.Render("Download error"))
+		lines = append(lines, strings.Split(ansi.Hardwrap(m.download.ErrorMessage, innerW, false), "\n")...)
 	}
 	return lines
 }
