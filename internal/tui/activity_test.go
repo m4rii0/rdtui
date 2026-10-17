@@ -24,8 +24,15 @@ func TestActivityStrip(t *testing.T) {
 	for _, mode := range []mode{modeMain, modeSearch, modeDetail, modeDownload, modeBulkDownload} {
 		m.mode = mode
 		v := ansi.Strip(renderView(m))
-		if !strings.Contains(v, "F6") || !strings.Contains(v, "63.0%") || strings.Contains(v, "SECRET") {
+		if !strings.Contains(v, "63.0%") || strings.Contains(v, "SECRET") || strings.Contains(v, "F6") {
 			t.Fatalf("activity missing/leaked in %s: %s", mode, v)
+		}
+		if mode == modeSearch {
+			if strings.Contains(v, "a activity") {
+				t.Fatal("search advertises an inactive activity shortcut")
+			}
+		} else if !strings.Contains(v, "a activity") {
+			t.Fatalf("missing letter shortcut in %s", mode)
 		}
 	}
 	m.mode = modeMain
@@ -62,18 +69,15 @@ func TestActivityStrip(t *testing.T) {
 }
 
 func TestActivityNavigation(t *testing.T) {
-	for _, base := range []mode{modeMain, modeSearch, modeDetail} {
+	for _, base := range []mode{modeMain, modeDetail} {
 		m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 		m.mode, m.returnMode = base, modeMain
 		m.download = &models.ManagedDownload{Filename: "file", Status: models.ManagedDownloadStatusActive}
 		m.searchInput.SetValue("query")
-		if base == modeSearch {
-			m.searchInput.Focus()
-		}
-		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+		next, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		m = next.(Model)
 		if m.mode != modeDownload || cmd != nil {
-			t.Fatal("F6 must navigate without starting/resolving")
+			t.Fatal("a must navigate without starting/resolving")
 		}
 		next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		m = next.(Model)
@@ -81,13 +85,13 @@ func TestActivityNavigation(t *testing.T) {
 			t.Fatalf("return context lost: %s", m.mode)
 		}
 	}
-	for _, base := range []mode{modeMagnetInput, modeURLInput, modeDelete} {
+	for _, base := range []mode{modeDelete, modeSort, modeQuitConfirm} {
 		m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 		m.mode = base
 		m.download = &models.ManagedDownload{}
-		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+		next, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		if next.(Model).mode != base || cmd != nil {
-			t.Fatal("F6 escaped a form/modal")
+			t.Fatal("a escaped a modal")
 		}
 	}
 }
@@ -96,8 +100,47 @@ func TestActivityFooterPriority(t *testing.T) {
 	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 	m.mode = modeMain
 	footer := ansi.Strip(activityFooter(m, 36))
-	if strings.Count(footer, "F6") != 1 || !strings.Contains(footer, "? help") || !strings.Contains(footer, "move") {
+	if strings.Count(footer, "a activity") != 1 || strings.Contains(footer, "F6") || !strings.Contains(footer, "? help") || !strings.Contains(footer, "move") {
 		t.Fatalf("essential hints crowded out: %q", footer)
+	}
+}
+
+func TestActivityShortcutPreservesTextInput(t *testing.T) {
+	for _, base := range []mode{modeSearch, modeTokenInput, modeMagnetInput, modeURLInput} {
+		m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
+		m.mode = base
+		m.download = &models.ManagedDownload{Filename: "file", Status: models.ManagedDownloadStatusActive}
+		if base == modeSearch {
+			m.searchInput.Focus()
+		} else {
+			m.input.Focus()
+		}
+		m, _ = uxRune(m, 'a')
+		if m.mode != base {
+			t.Fatalf("activity shortcut intercepted input in %s", base)
+		}
+		text := m.input.Value()
+		if base == modeSearch {
+			text = m.searchInput.Value()
+		}
+		if text != "a" {
+			t.Fatalf("%s input=%q, want a", base, text)
+		}
+	}
+}
+
+func TestActivityShortcutDropsF6AndRespectsHelp(t *testing.T) {
+	m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
+	m.mode = modeMain
+	m.download = &models.ManagedDownload{Status: models.ManagedDownloadStatusActive}
+	m, cmd := uxPress(m, tea.KeyPressMsg{Code: tea.KeyF6})
+	if m.mode != modeMain || cmd != nil {
+		t.Fatal("obsolete F6 binding still active")
+	}
+	m.helpVisible = true
+	m, cmd = uxRune(m, 'a')
+	if m.mode != modeMain || !m.helpVisible || cmd != nil {
+		t.Fatal("activity escaped help overlay")
 	}
 }
 

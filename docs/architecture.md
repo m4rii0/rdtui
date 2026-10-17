@@ -271,8 +271,9 @@ the cancellation key can never double as authorization for that decision.
 List columns adapt at 40/60/80 usable cells after marking/scrollbar space. Stable
 column indices keep hidden fields sortable and searchable. Help is viewport-bounded
 and includes the full current error with scrolling. Main/search geometry reserves
-search, activity and feedback rows even when idle. `F6` navigates without admitting
-work; `q` asks before canceling active downloads/queues; Ctrl+C remains immediate.
+search, activity and feedback rows even when idle. `a` navigates without admitting
+work outside searches and text-entry forms, where it remains ordinary input;
+`q` asks before canceling active downloads/queues; Ctrl+C remains immediate.
 
 Regression coverage: `TestMainStableGeometry`, `TestHelpErrorScroll`,
 `TestAdaptiveColumns`, `TestAdaptiveColumnHighlights`, `TestActivityStrip`,

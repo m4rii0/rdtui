@@ -32,8 +32,15 @@ func activityBase(md mode) bool {
 	return false
 }
 
+func activityShortcutContext(md mode) bool {
+	return activityBase(md) && md != modeSearch
+}
+
 func renderActivity(m Model, width int) string {
-	prefix := "F6 activity · "
+	prefix := "Activity · "
+	if activityShortcutContext(m.mode) {
+		prefix = "a activity · "
+	}
 	text := "No active download"
 	if m.activityIsQueue() {
 		b := m.bulk
@@ -96,7 +103,10 @@ func (m Model) openActivity() (tea.Model, tea.Cmd) {
 func activityFooter(m Model, width int) string {
 	defs := m.renderShortcutDefs()
 	filtered := make([]shortcutDef, 0, len(defs))
-	prefix := "F6 activity · ? help"
+	prefix := "? help"
+	if activityShortcutContext(m.mode) {
+		prefix = "a activity · " + prefix
+	}
 	list := m.mode == modeMain || m.mode == modeSearch
 	if list {
 		prefix += " · ↑↓ move"

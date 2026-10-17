@@ -30,7 +30,7 @@ func TestUXResizeAndNavigationPreservesWork(t *testing.T) {
 		if lipgloss.Width(view) > size[0] || lipgloss.Height(view) > size[1] {
 			t.Fatalf("resize overflow %v: %dx%d", size, lipgloss.Width(view), lipgloss.Height(view))
 		}
-		m, _ = uxPress(m, tea.KeyPressMsg{Code: tea.KeyF6})
+		m, _ = uxRune(m, 'a')
 		m, _ = uxPress(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 		m, _ = uxRune(m, 'o')
 		m, _ = uxPress(m, tea.KeyPressMsg{Code: tea.KeyEscape})

@@ -64,6 +64,6 @@ func renderCompactMain(m Model) string {
 	for i := range lines {
 		lines[i] = oneLine(lines[i], m.width)
 	}
-	lines = append(lines, "F6 activity · ? help · ↑↓ move", renderActivity(m, m.width), renderFeedback(m, m.width))
+	lines = append(lines, activityFooter(m, m.width), renderActivity(m, m.width), renderFeedback(m, m.width))
 	return boundView(strings.Join(lines, "\n"), m.width, m.height)
 }

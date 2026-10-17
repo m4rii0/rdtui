@@ -254,15 +254,16 @@ Key bindings (main view):
 - `b`: enter bulk operations mode (select multiple torrents)
 - `S` / `P` / `Z` / `D` / `N`: sort by status / progress / size / date / name
 - `o`: open the sort picker (selecting the current column toggles its direction)
-- `F6`: reopen the current download or bulk queue without starting another transfer
+- `a`: reopen the current download or bulk queue without starting another transfer
 - `?`: toggle help overlay
 - `esc`: exit bulk selection first, otherwise clear a kept filter without losing the selected torrent
 - `q`: quit; confirm with `y` if a download or bulk queue is active (`enter`, `n`, or `esc` stays)
 
 The activity strip remains visible while browsing and shows the latest download or
-queue status. `F6` opens it even when no torrent is selected; `esc` returns to the
-previous screen. Main-screen search, feedback and activity rows reserve their space
-so messages do not move the table. On narrow terminals, secondary columns disappear
+queue status. `a` opens it even when no torrent is selected; `esc` returns to the
+previous screen. The activity shortcut is inactive in searches and text-entry forms,
+where `a` remains ordinary input. Main-screen search, feedback and activity rows
+reserve their space so messages do not move the table. On narrow terminals, secondary columns disappear
 before the torrent name; hidden columns remain searchable and sortable.
 
 Press `?` to inspect shortcuts and the full current error; use arrows or
