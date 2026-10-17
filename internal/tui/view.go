@@ -248,12 +248,13 @@ func renderTorrentList(m Model, width, height int) string {
 	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(vis)))
 	bodyHeight := max(1, height-3) // +1 for divider line
 	showScrollbar := len(vis) > bodyHeight
-	colWidth := width
+	markPadding := ""
 	if m.batchMode {
-		colWidth -= 2
+		markPadding = "  "
 	}
+	colWidth := width - len(markPadding)
 	columns := tableColumns(colWidth, showScrollbar)
-	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
+	header := markPadding + renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
 	headerDiv := dividerLine(width)
 	start, end := torrentListWindow(len(vis), m.selectedIdx, bodyHeight)
 	thumbTop, thumbSize := scrollbarThumb(len(vis), bodyHeight, start)
@@ -266,7 +267,7 @@ func renderTorrentList(m Model, width, height int) string {
 			if m.batchSelected[t.ID] {
 				mark = "* "
 			} else {
-				mark = "  "
+				mark = markPadding
 			}
 		}
 		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID], idx == m.selectedIdx)
