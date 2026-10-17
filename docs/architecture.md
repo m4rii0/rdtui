@@ -268,8 +268,11 @@ Queue observations update the screen beneath a quit confirmation without replaci
 that confirmation. Canceling quit reveals any newly pending overwrite decision;
 the cancellation key can never double as authorization for that decision.
 
-List columns adapt at 40/60/80 usable cells after marking/scrollbar space. Stable
-column indices keep hidden fields sortable and searchable. Help is viewport-bounded
+List columns adapt at 40/60/80 usable cells after marking/scrollbar space. The
+two-cell selection space is reserved in both normal and batch modes, so toggling
+batch cannot change column positions or adaptive breakpoints. The table title owns
+the batch badge and selected count; its footer prioritizes batch actions.
+Stable column indices keep hidden fields sortable and searchable. Help is viewport-bounded
 and includes the full current error with scrolling. Main/search geometry reserves
 search, activity and feedback rows even when idle. `a` navigates without admitting
 work outside searches and text-entry forms, where it remains ordinary input;

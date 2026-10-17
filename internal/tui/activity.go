@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/m4rii0/rdtui/internal/app"
 	"github.com/m4rii0/rdtui/pkg/models"
 )
@@ -102,6 +103,9 @@ func (m Model) openActivity() (tea.Model, tea.Cmd) {
 
 func activityFooter(m Model, width int) string {
 	defs := m.renderShortcutDefs()
+	if m.mode == modeMain && m.batchMode {
+		return renderBatchFooter(defs, m, width)
+	}
 	filtered := make([]shortcutDef, 0, len(defs))
 	prefix := "? help"
 	if activityShortcutContext(m.mode) {
@@ -118,6 +122,31 @@ func activityFooter(m Model, width int) string {
 		}
 	}
 	return oneLine(prefix+" · "+renderShortcutFooter(filtered, m), width)
+}
+
+func renderBatchFooter(defs []shortcutDef, m Model, width int) string {
+	var primary, other []shortcutDef
+	for _, def := range defs {
+		switch def.action {
+		case actionBatchMark, actionBatchAll, actionExitBatch:
+			primary = append(primary, def)
+		default:
+			other = append(other, def)
+		}
+	}
+	essential := renderShortcutFooter(primary, m)
+	if lipgloss.Width(essential) > width {
+		for i := range primary {
+			switch primary[i].action {
+			case actionBatchAll:
+				primary[i].binding.SetHelp("^A", "all")
+			case actionExitBatch:
+				primary[i].binding.SetHelp("esc", "exit")
+			}
+		}
+		essential = renderShortcutFooter(primary, m)
+	}
+	return oneLine(essential+" · "+renderShortcutFooter(other, m), width)
 }
 
 func finishWorkbench(m Model, lines []string, width int) string {

@@ -280,6 +280,12 @@ Bulk operations mode (`b`):
 - `d`: bulk download marked completed torrents
 - `b` / `esc`: exit bulk operations mode
 
+The selection column always reserves the same two cells, so entering or leaving
+batch mode does not move columns or change which columns fit. Batch mode shows an
+amber `BATCH` label and selected count beside the table title; `·` means unmarked
+and `*` means marked. Its footer prioritizes marking, selecting all and exiting;
+on narrow terminals `^A` is the compact label for `ctrl+a`.
+
 Detail view (`enter`):
 - `s`: select files (when applicable)
 - `y`: copy URL, `d`: download, `x`: delete, `r`: refresh

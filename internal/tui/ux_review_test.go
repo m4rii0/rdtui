@@ -94,14 +94,18 @@ func TestQueueActivityReservesStatistics(t *testing.T) {
 	}
 }
 
-func TestFilteredAndMarkedFooterKeepsMovementHint(t *testing.T) {
+func TestFilteredFooterPrioritizesContext(t *testing.T) {
 	for _, marked := range []bool{false, true} {
 		m := NewModel(Dependencies{Runtime: newTestRuntime(t)})
 		m.mode = modeMain
 		m.filterApplied = true
 		m.batchMode = marked
 		footer := ansi.Strip(activityFooter(m, 36))
-		if !strings.Contains(footer, "move") || !strings.Contains(footer, "? help") {
+		if marked {
+			if !strings.Contains(footer, "space mark") || !strings.Contains(footer, "esc exit") {
+				t.Fatalf("batch actions lost: %s", footer)
+			}
+		} else if !strings.Contains(footer, "move") || !strings.Contains(footer, "? help") {
 			t.Fatalf("navigation hint lost: %s", footer)
 		}
 	}

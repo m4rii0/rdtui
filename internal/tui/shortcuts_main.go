@@ -83,9 +83,8 @@ func batchShortcutDefs(m Model) []shortcutDef {
 		shortcut(actionBatchMark, shortcutGroupSelection, 0, []string{"space"}, "space", "mark"),
 		shortcut(actionBatchAll, shortcutGroupSelection, 1, []string{"ctrl+a"}, "ctrl+a", "all"),
 		shortcut(actionBatchClear, shortcutGroupSelection, 2, []string{"ctrl+d"}, "ctrl+d", "clear"),
-		shortcut(actionExitBatch, shortcutGroupSelection, 5, []string{"esc"}, "esc", "exit").hiddenFromHelp().withFooter(false),
+		shortcut(actionExitBatch, shortcutGroupSelection, 5, []string{"esc"}, "esc", "exit batch"),
 		shortcut(actionToggleBatch, shortcutGroupSelection, 6, []string{"b"}, "b", "batch").hiddenFromHelp().withFooter(false),
-		helpOnlyShortcut(shortcutGroupSelection, 7, "b/esc", "exit"),
 	}
 	if m.hasBatchSelection() {
 		defs = append(defs,

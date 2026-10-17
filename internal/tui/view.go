@@ -124,9 +124,6 @@ func renderMain(m Model) string {
 
 	lines := []string{header, table, oneLine(renderSearchBar(m), innerWidth), renderActivity(m, innerWidth), renderFeedback(m, innerWidth)}
 	footer := activityFooter(m, innerWidth)
-	if m.mode == modeMain && m.batchMode {
-		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
-	}
 	lines = append(lines, dividerLine(innerWidth), truncateLine(footer, innerWidth))
 	for i := range lines {
 		if i != 1 {
@@ -231,27 +228,33 @@ func renderTorrentList(m Model, width, height int) string {
 		width = 20
 	}
 	vis := m.visibleTorrents()
+	count := fmt.Sprintf("[%d]", len(vis))
+	if len(vis) == 0 && (m.filterApplied || m.mode == modeSearch) {
+		count = fmt.Sprintf("[0/%d]", len(m.torrents))
+	}
+	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(count)
+	if m.batchMode {
+		badge := warnStyle.Render(fmt.Sprintf("BATCH · %d selected", len(m.batchSelected)))
+		title = oneLine(headStyle.Render("Torrents")+" "+subtleStyle.Render(count), max(0, width-lipgloss.Width(badge)-3)) + " · " + badge
+	}
+	title = oneLine(title, width)
 	if len(vis) == 0 {
 		if m.filterApplied || m.mode == modeSearch {
 			return strings.Join(fitLines([]string{
-				headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[0/%d]", len(m.torrents))),
+				title,
 				"",
 				mutedStyle.Render("  No matches"),
 			}, height), "\n")
 		}
 		return strings.Join(fitLines([]string{
-			headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(m.torrents))),
+			title,
 			"",
 			mutedStyle.Render("  No torrents loaded"),
 		}, height), "\n")
 	}
-	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(vis)))
 	bodyHeight := max(1, height-3) // +1 for divider line
 	showScrollbar := len(vis) > bodyHeight
-	markPadding := ""
-	if m.batchMode {
-		markPadding = "  "
-	}
+	const markPadding = "  "
 	colWidth := width - len(markPadding)
 	columns := tableColumns(colWidth, showScrollbar)
 	header := markPadding + renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
@@ -262,12 +265,12 @@ func renderTorrentList(m Model, width, height int) string {
 	var bodyLines []string
 	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
 		t := vis[idx]
-		mark := ""
+		mark := markPadding
 		if m.batchMode {
 			if m.batchSelected[t.ID] {
 				mark = "* "
 			} else {
-				mark = markPadding
+				mark = "· "
 			}
 		}
 		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID], idx == m.selectedIdx)
