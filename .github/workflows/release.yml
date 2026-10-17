@@ -63,6 +63,10 @@ jobs:
     runs-on: ubuntu-24.04
     needs: prepare
     environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     env:
       NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
       CHANNEL: ${{ inputs.channel }}
@@ -78,9 +82,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-
-      - name: Setup cosign
-        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Install golangci-lint
         run: |
@@ -110,11 +111,11 @@ jobs:
           cd bin
           sha256sum rdtui-* > checksums.txt
 
-      - name: Sign checksums
-        run: |
-          cosign sign-blob \
-            --yes \
-            --bundle bin/checksums.txt.sigstore.json \
+      - name: Attest release assets
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: |
+            bin/rdtui-*
             bin/checksums.txt
 
       - name: Tag release
@@ -132,7 +133,6 @@ jobs:
             gh release upload "${NEW_VERSION}" \
               bin/rdtui-* \
               bin/checksums.txt \
-              bin/checksums.txt.sigstore.json \
               --clobber
           else
             release_flags=(--latest)
@@ -142,7 +142,6 @@ jobs:
             gh release create "${NEW_VERSION}" \
               bin/rdtui-* \
               bin/checksums.txt \
-              bin/checksums.txt.sigstore.json \
               --verify-tag \
               "${release_flags[@]}" \
               --title "${NEW_VERSION}" \

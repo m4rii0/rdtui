@@ -243,7 +243,7 @@ func TestReleasePublication(t *testing.T) {
 			f.env = []string{"PATH=" + filepath.Join(f.dir, "tools") + ":" + os.Getenv("PATH"),
 				"NEW_VERSION=" + tt.version, "CHANNEL=" + tt.channel, "GH_EXISTS=" + tt.existing,
 				"GH_LOG=" + filepath.Join(f.dir, "gh-args")}
-			assets := []string{"bin/rdtui-linux-amd64", "bin/checksums.txt", "bin/checksums.txt.sigstore.json"}
+			assets := []string{"bin/rdtui-linux-amd64", "bin/checksums.txt"}
 			for _, asset := range assets {
 				f.write(asset, "fixture", 0o644)
 			}
@@ -269,18 +269,24 @@ func TestReleasePublication(t *testing.T) {
 }
 
 func TestReleaseFailureDoesNotPushTag(t *testing.T) {
-	for _, failure := range []string{"MAKE_EXIT=1", "COSIGN_EXIT=1"} {
-		t.Run(failure, func(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		makeExit string
+	}{
+		{"verification", "1"},
+		{"checksums", "0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			f := newReleaseFixture(t)
 			remote := filepath.Join(f.dir, "remote.git")
 			f.git("init", "--bare", "--quiet", remote)
 			f.git("remote", "add", "origin", remote)
 			f.write("tools/make", "#!/bin/sh\nexit \"${MAKE_EXIT:-0}\"\n", 0o755)
-			f.write("tools/cosign", "#!/bin/sh\nexit \"${COSIGN_EXIT:-0}\"\n", 0o755)
 			f.env = []string{"PATH=" + filepath.Join(f.dir, "tools") + ":" + os.Getenv("PATH"),
-				"NEW_VERSION=v1.3.0-rc.10", failure}
+				"NEW_VERSION=v1.3.0-rc.10", "MAKE_EXIT=" + tt.makeExit}
+			// No bin directory: checksum generation must fail if verification succeeds.
 			out, err := f.command("bash", "-euo", "pipefail", "-c",
-				workflowCommands(t, "Verify", "Sign checksums", "Tag release")).CombinedOutput()
+				workflowCommands(t, "Verify", "Generate checksums", "Tag release")).CombinedOutput()
 			if err == nil {
 				t.Fatalf("expected failed workflow: %s", out)
 			}

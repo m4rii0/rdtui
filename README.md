@@ -67,7 +67,8 @@ from the corresponding GitHub release to test them. `rdtui check-update` and
 `rdtui update` continue to use stable releases only.
 
 Both channels run verification and race tests before building the six platform
-binaries, checking their embedded version, and generating and signing checksums.
+binaries, checking their embedded version, generating checksums, and attesting
+the binaries and checksums with GitHub artifact attestations.
 Only then does the workflow create and push the tag and publish the release.
 The final stable release is rebuilt, not promoted from an RC's existing assets:
 select the same tested commit/ref when publishing it, and ensure the target
@@ -79,14 +80,14 @@ is not a FIFO queue. The existing `release` environment protections still apply.
 
 ### Verify Release Assets
 
-GitHub release checksums are signed in CI with keyless Sigstore signing. To verify a downloaded release, run these commands from the directory containing the release assets:
+Release binaries and checksums have signed build provenance attestations stored
+in GitHub. With the GitHub CLI installed and authenticated, verify a downloaded
+release from the directory containing its assets:
 
 ```bash
-cosign verify-blob \
-  --bundle checksums.txt.sigstore.json \
-  --certificate-identity 'https://github.com/m4rii0/rdtui/.github/workflows/release.yml@refs/heads/main' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  checksums.txt
+gh attestation verify checksums.txt \
+  --repo m4rii0/rdtui \
+  --cert-identity 'https://github.com/m4rii0/rdtui/.github/workflows/release.yml@refs/heads/main'
 
 sha256sum --check checksums.txt
 ```
@@ -95,6 +96,9 @@ This identity is for a manual workflow dispatch from `main`. For another trusted
 branch or tag, replace `refs/heads/main` with that exact dispatch ref. The signing
 identity follows the ref used to run the workflow, not the release tag created
 later inside the job; do not broaden the identity check to arbitrary refs.
+
+You can also verify an individual binary directly with the same
+`gh attestation verify` command, replacing `checksums.txt` with its filename.
 
 ## Build
 

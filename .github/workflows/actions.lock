@@ -4,13 +4,18 @@
 version: 'v0.0.3'
 workflows:
     '.github/workflows/release.yml':
+        - 'actions/attest@v4.2.2'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
-        - 'sigstore/cosign-installer@v4.1.2'
     '.github/workflows/verify.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
 dependencies:
+    'actions/attest@v4.2.2':
+        ref: 'v4.2.2'
+        commit: 'sha1-1e69f48acb82d1966a394da916b4c1698aa569d6'
+        owner_id: 44036562
+        repo_id: 760701061
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
@@ -21,8 +26,3 @@ dependencies:
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
         owner_id: 44036562
         repo_id: 192624594
-    'sigstore/cosign-installer@v4.1.2':
-        ref: 'v4.1.2'
-        commit: 'sha1-6f9f17788090df1f26f669e9d70d6ae9567deba6'
-        owner_id: 71096353
-        repo_id: 351211695
