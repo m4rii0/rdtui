@@ -110,6 +110,7 @@ func (m Model) canBulkSelectFilesSelection() bool {
 func (m Model) canShowHelp() bool {
 	switch m.mode {
 	case modeMain, modeDetail, modeDownload, modeBulkDownload,
+		modeSort, modeQuitConfirm,
 		modeSelectFiles, modeChooseTarget, modeBulkSelectFiles,
 		modeBulkOrder, modeBulkFiles, modeBulkConfirm, modeBulkCleanup:
 		return true

@@ -11,10 +11,15 @@ import (
 type shortcutAction string
 
 const (
-	actionToggleHelp shortcutAction = "toggle-help"
-	actionCloseHelp  shortcutAction = "close-help"
+	actionToggleHelp   shortcutAction = "toggle-help"
+	actionCloseHelp    shortcutAction = "close-help"
+	actionHelpUp       shortcutAction = "help-up"
+	actionHelpDown     shortcutAction = "help-down"
+	actionHelpPageUp   shortcutAction = "help-page-up"
+	actionHelpPageDown shortcutAction = "help-page-down"
 
-	actionQuit shortcutAction = "quit"
+	actionQuit         shortcutAction = "quit"
+	actionOpenActivity shortcutAction = "open-activity"
 
 	actionMoveUp       shortcutAction = "move-up"
 	actionMoveDown     shortcutAction = "move-down"
@@ -251,6 +256,10 @@ func (m Model) matchShortcut(msg tea.KeyPressMsg) (shortcutAction, bool) {
 
 func globalShortcutDefs(m Model, includeHelpToggle bool) []shortcutDef {
 	defs := []shortcutDef{}
+	if activityShortcutContext(m.mode) {
+		defs = append(defs, shortcut(actionOpenActivity, shortcutGroupNavigation, 0, []string{"a"}, "a", "activity"))
+		defs = append(defs, shortcut(actionQuit, shortcutGroupGlobal, 130, []string{"q"}, "q", "quit"))
+	}
 	if includeHelpToggle && m.canShowHelp() {
 		defs = append(defs, shortcut(actionToggleHelp, shortcutGroupGlobal, 100, []string{"?"}, "?", "help"))
 	}
@@ -259,6 +268,10 @@ func globalShortcutDefs(m Model, includeHelpToggle bool) []shortcutDef {
 
 func helpOverlayShortcuts() []shortcutDef {
 	return []shortcutDef{
+		shortcut(actionHelpUp, shortcutGroupNavigation, 1, []string{"up", "k"}, "↑/k", "scroll up"),
+		shortcut(actionHelpDown, shortcutGroupNavigation, 2, []string{"down", "j"}, "↓/j", "scroll down"),
+		shortcut(actionHelpPageUp, shortcutGroupNavigation, 3, []string{"pgup"}, "pgup", "page up"),
+		shortcut(actionHelpPageDown, shortcutGroupNavigation, 4, []string{"pgdown"}, "pgdown", "page down"),
 		shortcut(actionCloseHelp, shortcutGroupGlobal, 0, []string{"?", "esc"}, "?/esc", "close").withFooter(false),
 	}
 }

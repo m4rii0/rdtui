@@ -381,6 +381,7 @@ func (s *Service) seedData() []torrentEntry {
 		{"Artix.Linux.20250315.plasma.x86_64.iso", "magnet_conversion", 0, 0},
 		{"FreeBSD.14.2.RELEASE.amd64.disc1.iso", "waiting_files_selection", 0, 1_000_000_000},
 		{"NetBSD.10.1.amd64.iso", "waiting_files_selection", 0, 750_000_000},
+		{"Debian.12.9.0.Install.Media", "downloaded", 100, 11_100_000_000},
 	}
 
 	entries := make([]torrentEntry, 0, len(seeds))
@@ -398,10 +399,17 @@ func (s *Service) seedData() []torrentEntry {
 
 func (s *Service) makeTorrent(id, name, status string, progress float64, bytes int64) torrentEntry {
 	hash := fmt.Sprintf("%040x", rand.Int63())
+	files := generateFiles(name, bytes)
 
 	links := []string{}
 	if status == "downloaded" {
-		links = []string{"https://real-debrid.com/d/" + id}
+		for _, file := range files {
+			link := "https://real-debrid.com/d/" + id
+			if len(files) > 1 {
+				link += fmt.Sprintf("/%d", file.ID)
+			}
+			links = append(links, link)
+		}
 	}
 
 	t := models.Torrent{
@@ -415,8 +423,6 @@ func (s *Service) makeTorrent(id, name, status string, progress float64, bytes i
 		Added:    time.Now(),
 		Links:    links,
 	}
-
-	files := generateFiles(name, bytes)
 
 	info := models.TorrentInfo{
 		Torrent:          t,
@@ -433,6 +439,14 @@ func (s *Service) makeTorrent(id, name, status string, progress float64, bytes i
 func generateFiles(name string, totalBytes int64) []models.TorrentFile {
 	if totalBytes == 0 {
 		return []models.TorrentFile{{ID: 1, Path: "/" + name, Bytes: 0, Selected: false}}
+	}
+	if distro, bundle := strings.CutSuffix(name, ".Install.Media"); bundle {
+		part := totalBytes / 3
+		return []models.TorrentFile{
+			{ID: 1, Path: "/" + distro + ".DVD-1.iso", Bytes: part, Selected: true},
+			{ID: 2, Path: "/" + distro + ".DVD-2.iso", Bytes: part, Selected: true},
+			{ID: 3, Path: "/" + distro + ".DVD-3.iso", Bytes: totalBytes - 2*part, Selected: true},
+		}
 	}
 
 	return []models.TorrentFile{

@@ -134,6 +134,21 @@ func (m Model) acceptsBulkSnapshot(msg bulkSnapshotMsg) bool {
 }
 
 func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
+	// Queue observations may discover a decision while the user is answering
+	// quit. Apply them to its underlying screen without reinterpreting the
+	// user's next safe-cancel key as an overwrite confirmation.
+	if m.mode == modeQuitConfirm {
+		m.mode = m.quitReturnMode
+		updated, cmd := m.applyBulkSnapshot(msg)
+		result := updated.(Model)
+		result.quitReturnMode = result.mode
+		result.mode = modeQuitConfirm
+		return result, cmd
+	}
+	return m.applyBulkSnapshot(msg)
+}
+
+func (m Model) applyBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 	if !m.acceptsBulkSnapshot(msg) {
 		return m, nil
 	}
@@ -152,12 +167,16 @@ func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 	}
 	if pending := m.pendingDownload; pending != nil && pending.Queue != nil && pending.Queue.QueueID == msg.queueID &&
 		(pending.Queue.ItemIndex != msg.snapshot.CurrentIndex || !msg.snapshot.AwaitingOverwrite) {
-		m.mode = pending.ResumeMode
+		if m.mode == modeOverwrite {
+			m.mode = pending.ResumeMode
+		}
 		m.pendingDownload = nil
 	}
 	if msg.snapshot.Finished {
 		if m.pendingDownload != nil && m.pendingDownload.Queue != nil && m.pendingDownload.Queue.QueueID == msg.queueID {
-			m.mode = m.pendingDownload.ResumeMode
+			if m.mode == modeOverwrite {
+				m.mode = m.pendingDownload.ResumeMode
+			}
 			m.pendingDownload = nil
 		}
 		success, failed, skipped := m.bulk.resultCounts()
@@ -174,9 +193,15 @@ func (m Model) handleBulkSnapshot(msg bulkSnapshotMsg) (tea.Model, tea.Cmd) {
 		decision := app.QueueDecision{QueueID: msg.queueID, ItemIndex: msg.snapshot.CurrentIndex}
 		if m.bulk.DecidedItem == nil || m.bulk.DecidedItem.QueueID != decision.QueueID || m.bulk.DecidedItem.ItemIndex != decision.ItemIndex {
 			if m.pendingDownload == nil || m.pendingDownload.Queue == nil || *m.pendingDownload.Queue != decision {
-				m.pendingDownload = &pendingDownloadState{Queue: new(decision), ResumeMode: m.mode, Path: msg.snapshot.ExistingPath,
+				resume := m.mode
+				if resume == modeSort {
+					resume = modeMain
+				}
+				m.pendingDownload = &pendingDownloadState{Queue: new(decision), ResumeMode: resume, Path: msg.snapshot.ExistingPath,
 					Filename: filepath.Base(msg.snapshot.ExistingPath), RemoteBytes: msg.snapshot.RemoteBytes, ExistingBytes: msg.snapshot.ExistingBytes}
-				m.mode = modeOverwrite
+				if m.mode != modeSort {
+					m.mode = modeOverwrite
+				}
 				m.status = "Existing file found"
 			}
 		}
@@ -836,17 +861,7 @@ func renderBulkDownloadView(m Model) string {
 	} else {
 		lines = append(lines, renderBulkProgressPanel(m, innerWidth))
 	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderBulkProgressPanel(m Model, width int) string {

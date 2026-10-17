@@ -114,12 +114,16 @@ type Model struct {
 	status     string
 	errText    string
 
-	input       textinput.Model
-	inputPrompt string
-	inputAction inputAction
-	spinner     spinner.Model
-	helpVisible bool
-	flash       flashState
+	input              textinput.Model
+	inputPrompt        string
+	inputAction        inputAction
+	spinner            spinner.Model
+	helpVisible        bool
+	helpOffset         int
+	activityReturnMode mode
+	quitReturnMode     mode
+	sortCursor         int
+	flash              flashState
 }
 
 type pendingDownloadState struct {
@@ -542,19 +546,33 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 	switch action {
 	case actionToggleHelp:
 		m.helpVisible = true
+		m.helpOffset = 0
+		return m, nil
+	case actionHelpUp, actionHelpDown, actionHelpPageUp, actionHelpPageDown:
+		delta := 1
+		if action == actionHelpPageUp || action == actionHelpPageDown {
+			delta = max(1, m.height-6)
+		}
+		if action == actionHelpUp || action == actionHelpPageUp {
+			delta = -delta
+		}
+		m.helpOffset = max(0, min(m.helpOffset+delta, helpMaxOffset(m)))
 		return m, nil
 	case actionCloseHelp:
 		m.helpVisible = false
 		return m, nil
+	case actionOpenActivity:
+		return m.openActivity()
 	case actionQuit:
-		if m.mode == modeMain && m.filterApplied {
-			m.filterApplied = false
-			m.filteredTorrents = nil
-			m.selectedIdx = 0
+		if m.hasActiveWork() {
+			m.quitReturnMode = m.mode
+			m.mode = modeQuitConfirm
 			return m, nil
 		}
 		m.runtime.Stop()
 		return m, tea.Quit
+	case actionPageUp, actionPageDown, actionFirst, actionLast, actionMainEscape, actionOpenSort, actionSortUp, actionSortDown, actionSortApply, actionSortCancel, actionQuitConfirm, actionQuitCancel:
+		return m.navigationAction(action)
 	case actionMoveUp:
 		return m.handleMove(-1)
 	case actionMoveDown:
@@ -688,11 +706,7 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		}
 		return m, nil
 	case actionSearchCancel:
-		m.searchInput.Blur()
-		m.searchInput.Reset()
-		m.filterApplied = false
-		m.filteredTorrents = nil
-		m.selectedIdx = 0
+		m.clearTorrentFilter()
 		m.mode = modeMain
 		return m, nil
 	case actionSearchConfirm:
@@ -706,6 +720,11 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 		m.mode = modeMain
 		return m, nil
 	case actionBack:
+		if (m.mode == modeDownload || m.mode == modeBulkDownload) && m.activityReturnMode != "" {
+			m.mode = m.activityReturnMode
+			m.activityReturnMode = ""
+			return m, nil
+		}
 		switch m.mode {
 		case modeDetail:
 			m.detailRequest.invalidate()
@@ -843,14 +862,7 @@ func (m Model) handleShortcutAction(action shortcutAction) (tea.Model, tea.Cmd) 
 func (m Model) handleMove(delta int) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeMain, modeSearch:
-		newIdx := m.selectedIdx + delta
-		vis := m.visibleTorrents()
-		if newIdx < 0 || newIdx >= len(vis) {
-			return m, nil
-		}
-		m.selectedIdx = newIdx
-		cmd := m.requestDetail(m.selectedTorrentID())
-		return m, cmd
+		return m.moveTorrentCursor(m.selectedIdx + delta)
 	case modeFileBrowser:
 		if m.browser.EditingPath {
 			m.browser.moveEditCursor(delta)
@@ -968,7 +980,7 @@ func (m Model) handleDownloadAction() (tea.Model, tea.Cmd) {
 			}
 			return m.beginBulkDownloadSetup()
 		}
-		if m.detail != nil && m.detail.Status == "downloaded" {
+		if m.detail != nil && m.detail.ID == m.selectedTorrentID() && m.detail.Status == "downloaded" {
 			m.returnMode = modeMain
 			return m.beginHandoff(handoffDownload)
 		}

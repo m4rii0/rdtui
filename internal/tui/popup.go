@@ -82,6 +82,8 @@ func popupSize(termW, termH int) (int, int) {
 
 func isPopupMode(m mode) bool {
 	switch m {
+	case modeSort, modeQuitConfirm:
+		return true
 	case modeSelectFiles, modeDelete, modeChooseTarget,
 		modeOverwrite, modeShowURL, modeFileBrowser,
 		modeMagnetInput, modeURLInput, modeBulkSelectFiles, modeBulkOrder,
@@ -93,6 +95,8 @@ func isPopupMode(m mode) bool {
 
 func renderPopupContent(m Model) string {
 	switch m.mode {
+	case modeSort, modeQuitConfirm:
+		return renderNavigationPopup(m)
 	case modeSelectFiles:
 		return renderSelectFilesPopup(m)
 	case modeDelete:
@@ -125,6 +129,12 @@ func renderPopupContent(m Model) string {
 
 func renderBackground(m Model) string {
 	switch m.mode {
+	case modeSort:
+		m.mode = modeMain
+		return renderMain(m)
+	case modeQuitConfirm:
+		m.mode = m.quitReturnMode
+		return renderBackground(m)
 	case modeStarting:
 		return "Starting..."
 	case modeAuthChoice:

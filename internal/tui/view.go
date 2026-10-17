@@ -17,13 +17,16 @@ func renderView(m Model) string {
 	debug.Log("renderView: mode=%s width=%d height=%d loading=%v", m.mode, m.width, m.height, m.loading)
 	if m.helpVisible {
 		bg := appStyle.Render(renderBackground(m))
-		return renderOverlayOnBackground(bg, renderHelpOverlay(m), m.width, m.height)
+		return boundView(renderOverlayOnBackground(bg, renderHelpOverlay(m), m.width, m.height), m.width, m.height)
 	}
 	if isPopupMode(m.mode) {
 		bg := appStyle.Render(renderBackground(m))
-		return renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height)
+		return boundView(renderOverlayOnBackground(bg, renderPopupContent(m), m.width, m.height), m.width, m.height)
 	}
-	return appStyle.Render(renderBackground(m))
+	if activityBase(m.mode) && ((m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12)) {
+		return renderCompactMain(m)
+	}
+	return boundView(appStyle.Render(renderBackground(m)), m.width, m.height)
 }
 
 func username(m Model) string {
@@ -55,7 +58,7 @@ func renderAuthChoice(m Model) string {
 	if m.status != "" {
 		lines = append(lines, "", infoStyle.Render("  ▸ "+m.status))
 	}
-	return strings.Join(lines, "\n")
+	return authLayout(m, lines)
 }
 
 func renderInput(m Model) string {
@@ -72,7 +75,7 @@ func renderInput(m Model) string {
 	if m.errText != "" {
 		lines = append(lines, "", errorStyle.Render("  ✗ "+m.errText))
 	}
-	return strings.Join(lines, "\n")
+	return authLayout(m, lines)
 }
 
 func renderDeviceAuth(m Model) string {
@@ -104,6 +107,21 @@ func renderDeviceAuth(m Model) string {
 	if m.loading {
 		lines = append(lines, "", infoStyle.Render("  ⠋ Waiting for authorization..."))
 	}
+	return authLayout(m, lines)
+}
+
+// Keep authentication actionable when the banner and spacing exceed the screen.
+func authLayout(m Model, lines []string) string {
+	available := m.height - appStyle.GetVerticalFrameSize()
+	if m.height > 0 && lipgloss.Height(strings.Join(lines, "\n")) > available {
+		compact := make([]string, 0, len(lines)-1)
+		for _, line := range lines[1:] {
+			if strings.TrimSpace(line) != "" {
+				compact = append(compact, strings.TrimPrefix(line, "  "))
+			}
+		}
+		lines = compact
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -112,46 +130,21 @@ func renderMain(m Model) string {
 	if width <= 0 {
 		width = 120
 	}
-	innerWidth := width - 4
-
-	bodyHeight := m.height - 2
-	if bodyHeight <= 0 {
-		bodyHeight = 24
-	}
-	reserved := 4 // header(1) + empty(1) + dividerLine(1) + footer(1)
-	if m.status != "" {
-		reserved++
-	}
-	if m.errText != "" {
-		reserved++
-	}
-	if m.mode == modeSearch || m.filterApplied {
-		reserved++
-	}
-	tableHeight := max(4, bodyHeight-reserved)
+	innerWidth := max(1, width-4)
+	tableHeight := mainTableHeight(width, m.height)
 
 	header := renderHeaderLine(renderCompactHeader(m.version, username(m)), m, innerWidth)
 
 	table := renderTorrentList(m, innerWidth, tableHeight)
 
-	lines := []string{header, "", table}
-	if bar := renderSearchBar(m); bar != "" {
-		lines = append(lines, bar)
-	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	footer := renderShortcutFooter(m.renderShortcutDefs(), m)
-	if m.mode == modeMain && m.batchMode {
-		footer += footerSepStyle.Render("  ──  ") + warnStyle.Render(fmt.Sprintf("marked: %d", len(m.batchSelected)))
-	}
+	lines := []string{header, table, oneLine(renderSearchBar(m), innerWidth), renderActivity(m, innerWidth), renderFeedback(m, innerWidth)}
+	footer := activityFooter(m, innerWidth)
 	lines = append(lines, dividerLine(innerWidth), truncateLine(footer, innerWidth))
+	for i := range lines {
+		if i != 1 {
+			lines[i] = oneLine(lines[i], innerWidth)
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -197,17 +190,7 @@ func renderDetailView(m Model) string {
 		lines = append(lines, panelStyle.Width(innerWidth).Render(strings.Join(detailLines, "\n")))
 	}
 
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderDownloadView(m Model) string {
@@ -249,17 +232,7 @@ func renderDownloadView(m Model) string {
 		}
 		lines = append(lines, boxStyle.Width(innerWidth).Render(strings.Join(stats, "\n")))
 	}
-	if m.status != "" {
-		lines = append(lines, mutedStyle.Render("  ▸ "+m.status))
-	}
-	if m.errText != "" {
-		lines = append(lines, errorStyle.Render("  ✗ "+m.errText))
-	}
-	if flash := renderFlash(m); flash != "" {
-		lines = append(lines, flash)
-	}
-	lines = append(lines, dividerLine(innerWidth), truncateLine(renderShortcutFooter(m.renderShortcutDefs(), m), innerWidth))
-	return strings.Join(lines, "\n")
+	return finishWorkbench(m, lines, innerWidth)
 }
 
 func renderTorrentList(m Model, width, height int) string {
@@ -270,29 +243,36 @@ func renderTorrentList(m Model, width, height int) string {
 		width = 20
 	}
 	vis := m.visibleTorrents()
+	count := fmt.Sprintf("[%d]", len(vis))
+	if len(vis) == 0 && (m.filterApplied || m.mode == modeSearch) {
+		count = fmt.Sprintf("[0/%d]", len(m.torrents))
+	}
+	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(count)
+	if m.batchMode {
+		badge := warnStyle.Render(fmt.Sprintf("BATCH · %d selected", len(m.batchSelected)))
+		title = oneLine(headStyle.Render("Torrents")+" "+subtleStyle.Render(count), max(0, width-lipgloss.Width(badge)-3)) + " · " + badge
+	}
+	title = oneLine(title, width)
 	if len(vis) == 0 {
 		if m.filterApplied || m.mode == modeSearch {
 			return strings.Join(fitLines([]string{
-				headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[0/%d]", len(m.torrents))),
+				title,
 				"",
 				mutedStyle.Render("  No matches"),
 			}, height), "\n")
 		}
 		return strings.Join(fitLines([]string{
-			headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(m.torrents))),
+			title,
 			"",
 			mutedStyle.Render("  No torrents loaded"),
 		}, height), "\n")
 	}
-	title := headStyle.Render("▸ Torrents") + "  " + subtleStyle.Render(fmt.Sprintf("[%d]", len(vis)))
 	bodyHeight := max(1, height-3) // +1 for divider line
 	showScrollbar := len(vis) > bodyHeight
-	colWidth := width
-	if m.batchMode {
-		colWidth -= 2
-	}
+	const markPadding = "  "
+	colWidth := width - len(markPadding)
 	columns := tableColumns(colWidth, showScrollbar)
-	header := renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
+	header := markPadding + renderTableHeader(columns, m.sortColumn, m.sortAscending, colWidth)
 	headerDiv := dividerLine(width)
 	start, end := torrentListWindow(len(vis), m.selectedIdx, bodyHeight)
 	thumbTop, thumbSize := scrollbarThumb(len(vis), bodyHeight, start)
@@ -300,12 +280,12 @@ func renderTorrentList(m Model, width, height int) string {
 	var bodyLines []string
 	for row, idx := 0, start; idx < end; row, idx = row+1, idx+1 {
 		t := vis[idx]
-		mark := ""
+		mark := markPadding
 		if m.batchMode {
 			if m.batchSelected[t.ID] {
 				mark = "* "
 			} else {
-				mark = "  "
+				mark = "· "
 			}
 		}
 		rowStr := mark + renderTableRow(t, columns, m.filterMatches[t.ID], idx == m.selectedIdx)
@@ -339,7 +319,13 @@ func renderSearchBar(m Model) string {
 	if m.filterApplied && m.mode != modeSearch {
 		prefix = warnStyle.Render("▸ ") + mutedStyle.Render("filter: ")
 	}
-	return prefix + m.searchInput.View() + "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
+	suffix := "  " + mutedStyle.Render("[") + count + mutedStyle.Render("]")
+	if (m.width > 0 && m.width < 40) || (m.height > 0 && m.height < 12) {
+		// Resize the viewport before rendering so it scrolls with the cursor.
+		m.searchInput.SetWidth(max(1, m.width-lipgloss.Width(prefix+suffix+m.searchInput.Prompt)-1))
+		m.searchInput.SetCursor(m.searchInput.Position())
+	}
+	return prefix + m.searchInput.View() + suffix
 }
 
 type shortcutHint struct {
