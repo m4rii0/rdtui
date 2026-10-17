@@ -2,7 +2,10 @@
 
 `rdtui` is a Go terminal UI for managing Real-Debrid torrents.
 
-![rdtui terminal showcase](docs/assets/rdtui-showcase.gif)
+[Record and publish the demo video](#record-and-publish-the-showcase).
+
+<!-- Replace this comment with the GitHub-hosted video URL after manual upload.
+     Do not add the generated MP4 to Git. See the showcase instructions below. -->
 
 ## Status
 
@@ -361,6 +364,72 @@ Download polling runs every second after the previous poll completes; torrent
 list refresh runs every five seconds. Batch delete/copy/file-selection requests
 retain a cancelable 250-millisecond delay. See [architecture and acceptance
 traceability](docs/architecture.md) for ownership, cancellation, and failure contracts.
+
+### Record and publish the showcase
+
+```bash
+make showcase-video
+```
+
+This records the approximately 78-second offline demo and adds English captions
+below the terminal. VHS records directly to MP4; no GIF is generated or converted.
+The final video is 1920×1080: a native 1920×960 terminal recording with 27px text,
+plus a 120px caption band with 40px text. The terminal is not upscaled.
+Hidden setup builds the binary in the repository, then launches it from the
+neutral `/tmp/opencode/rdtui-showcase-demo/` directory with synthetic `.torrent`
+fixtures. This prevents the import browser and its path editor from exposing
+your real repository path, home directory, or local directory listing. Keep the
+directory change inside the hidden setup when editing the recording.
+FFmpeg adds the captions and exports H.264 (`libx264`) with `yuv420p` and
+`+faststart` for browser playback. The video has no audio. Recording
+requires Go, VHS and its browser/`ttyd` dependencies, Python 3.9+, and FFmpeg
+with the `subtitles` (libass) filter and `ffprobe`. Install Ubuntu Sans Mono for
+the intended typography.
+
+Edit `docs/assets/rdtui-showcase.tape`; each `# Caption: ...` comment starts a
+caption that lasts until the next one. The renderer uses VHS screenshot frame
+numbers to keep captions synchronized with screen waits and hidden setup, rather
+than estimating their timing. This integration is tested with VHS 0.12.1; it
+fails if VHS stops exposing the expected screenshot frame filenames. Nonzero
+`LoopOffset` and non-default `PlaybackSpeed` are not supported with captions.
+
+The final video is `bin/showcase/rdtui-showcase.mp4`, with a matching `.srt`
+sidecar. All recordings, subtitles and scene screenshots stay under ignored
+`bin/showcase/`: **do not commit them**. Only the tape, rendering tools, tests
+and documentation belong in Git. Running VHS on the tape directly still works,
+but produces a recording without captions.
+To reprocess the existing recording without replaying the tour, use
+`python3 scripts/showcase.py --captions-only`; this rejects a changed tape.
+
+Test the caption renderer with `python3 -m unittest discover -s scripts/tests`.
+
+Verify the upload format:
+
+```bash
+ffprobe -v error -select_streams v:0 \
+  -show_entries stream=codec_name,pix_fmt \
+  -of default=noprint_wrappers=1 bin/showcase/rdtui-showcase.mp4
+```
+
+Expected: `codec_name=h264` and `pix_fmt=yuv420p`.
+
+Upload the video manually, rather than adding it to the repository:
+
+1. Open an issue/PR comment editor on GitHub.
+2. Drag `bin/showcase/rdtui-showcase.mp4` into the editor and wait for the upload.
+3. Copy the generated GitHub attachment URL, then open the README editor. Replace
+   the placeholder comment near the top with that URL on its own line and check
+   the preview. The attachment uploads immediately; you do not need to post the
+   issue/PR comment just to obtain its URL.
+4. Save the README change only. Do not `git add` the MP4, `.srt`, or a GIF.
+
+Generation never uploads anything or creates a commit. Re-upload the MP4 and
+replace its URL when publishing an updated demo; the local `bin/` path is not a
+public video link.
+
+GitHub's [attachment limits](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)
+are currently 10 MB per video for free plans and 100 MB for paid plans. Check the
+file size before uploading; H.264 is GitHub's recommended compatibility choice.
 
 ## License
 

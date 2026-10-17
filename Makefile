@@ -4,12 +4,13 @@ CMD_DIR ?= ./cmd/rdtui
 BIN_DIR ?= bin
 BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 VHS ?= vhs
+PYTHON ?= python3
 VHS_TAPE ?= docs/assets/rdtui-showcase.tape
 VHS_BROWSER_LIB_DIR ?= $(HOME)/.cache/rdtui-vhs-libs/usr/lib/x86_64-linux-gnu
 VERSION ?= $(shell latest_tag=$$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1); short_hash=$$(git rev-parse --short HEAD 2>/dev/null); dirty=$$(test -z "$$(git status --porcelain 2>/dev/null)" || printf '+dirty'); if [ -n "$$latest_tag" ] && [ -n "$$short_hash" ]; then printf '%s-%s%s' "$$latest_tag" "$$short_hash" "$$dirty"; elif [ -n "$$short_hash" ]; then printf 'v0.0.0-%s%s' "$$short_hash" "$$dirty"; else printf 'dev'; fi)
 LDFLAGS := -ldflags "-s -w -X github.com/m4rii0/rdtui/internal/version.Version=$(VERSION)"
 
-.PHONY: help build run demo run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-gif
+.PHONY: help build run demo run-debug test test-race lint vet fmt fmt-check tidy tidy-check clean install check verify build-all showcase-video
 
 help:
 	@printf '%s\n' \
@@ -26,7 +27,7 @@ help:
 	  '  make fmt        Format Go code' \
 	  '  make tidy       Tidy go.mod/go.sum' \
 	  '  make install    Install the binary with go install' \
-	  '  make showcase-gif  Render the VHS showcase GIF' \
+	  '  make showcase-video  Render the captioned showcase MP4 (local only)' \
 	  '  make clean      Remove build artifacts' \
 	  '  make check      Run fmt, lint, test, and build' \
 	  '  make verify     Verify fmt, tidy, lint, test, and build without rewriting files'
@@ -91,9 +92,9 @@ tidy-check:
 install:
 	$(GO) install $(LDFLAGS) $(CMD_DIR)
 
-showcase-gif:
+showcase-video:
 	$(VHS) validate "$(VHS_TAPE)"
-	PATH="/usr/bin:/bin:$$PATH" LD_LIBRARY_PATH="$(VHS_BROWSER_LIB_DIR)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}" $(VHS) "$(VHS_TAPE)"
+	PATH="/usr/bin:/bin:$$PATH" LD_LIBRARY_PATH="$(VHS_BROWSER_LIB_DIR)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}" $(PYTHON) scripts/showcase.py --vhs "$(VHS)" "$(VHS_TAPE)"
 
 clean:
 	rm -rf $(BIN_DIR)

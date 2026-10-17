@@ -3,6 +3,7 @@ bin/
 # Go test artifacts
 *.test
 coverage.out
+__pycache__/
 
 # OS/editor noise
 .DS_Store

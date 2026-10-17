@@ -154,3 +154,66 @@ func TestAddedTorrentFilenames(t *testing.T) {
 		})
 	}
 }
+
+func TestDemoHasReadyMultiFileDownloadTargets(t *testing.T) {
+	s := NewService(t.Context())
+	torrents, err := s.ListTorrents(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, torrent := range torrents {
+		if torrent.Filename != "Debian.12.9.0.Install.Media" {
+			continue
+		}
+		info, err := s.TorrentInfo(t.Context(), torrent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets := app.DownloadTargets(info)
+		if torrent.Status != "downloaded" || len(info.Files) != 3 || len(targets) != 3 || len(torrent.Links) != 3 {
+			t.Fatalf("multi-file fixture is not downloadable: %+v, targets=%+v", info, targets)
+		}
+		var total int64
+		for i, file := range info.Files {
+			total += file.Bytes
+			if targets[i].FilePath != file.Path || targets[i].Link == "" {
+				t.Fatalf("target does not identify its file: %+v", targets[i])
+			}
+			for _, previous := range targets[:i] {
+				if targets[i].Link == previous.Link {
+					t.Fatal("multi-file targets share a link")
+				}
+			}
+		}
+		if total != info.Bytes {
+			t.Fatalf("file sizes total %d, want %d", total, info.Bytes)
+		}
+		return
+	}
+	t.Fatal("no ready multi-file torrent in demo data")
+}
+
+func TestDemoMultiFileMagnetSelection(t *testing.T) {
+	s := NewService(t.Context())
+	added, err := s.AddMagnet(t.Context(), "magnet:?xt=hash&dn=KDE.Neon.Install.Media")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.TorrentInfo(t.Context(), added.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != "waiting_files_selection" || len(info.Files) != 3 {
+		t.Fatalf("magnet cannot demonstrate multi-file selection: %+v", info)
+	}
+	if err := s.SelectFiles(t.Context(), added.ID, []int{1, 3}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = s.TorrentInfo(t.Context(), added.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != "downloading" || !info.Files[0].Selected || info.Files[1].Selected || !info.Files[2].Selected {
+		t.Fatalf("selection was not applied: %+v", info)
+	}
+}
